@@ -4,6 +4,8 @@
 [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/forja)
 [![License](https://img.shields.io/hexpm/l/forja.svg)](LICENSE)
 
+*Onde eventos sao forjados em certeza.*
+
 **Event Bus com processamento dual-path para Elixir** -- latencia de PubSub com garantias de entrega do Oban.
 
 [Read in English](README.md)
@@ -11,6 +13,8 @@
 ---
 
 ## Por que Forja?
+
+> **Forja** -- uma forja transforma metal bruto em algo confiavel e duradouro atraves do fogo e do martelo. Forja faz o mesmo com seus eventos: o caminho rapido e o fogo, o caminho garantido e o martelo, e o que sai e um evento que voce pode confiar que foi processado exatamente uma vez.
 
 A maioria dos sistemas de eventos forca uma escolha: **rapido mas nao confiavel** (PubSub) ou **confiavel mas lento** (filas persistentes). Forja entrega os dois.
 

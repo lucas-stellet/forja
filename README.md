@@ -7,6 +7,8 @@
 [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/forja)
 [![License](https://img.shields.io/hexpm/l/forja.svg)](LICENSE)
 
+*Where events are forged into certainty.*
+
 **Event Bus with dual-path processing for Elixir** -- PubSub latency with Oban delivery guarantees.
 
 [Leia em Portugues](README.pt-BR.md)
@@ -14,6 +16,8 @@
 ---
 
 ## Why Forja?
+
+> **Forja** (/ˈfɔʁ.ʒɐ/) -- Portuguese for *forge*. A forge shapes raw metal through fire and hammer into something reliable and enduring. Forja does the same with your events: the fast path is the fire, the guaranteed path is the hammer, and what comes out is an event you can trust was processed exactly once.
 
 Most event systems force a trade-off: **fast but unreliable** (PubSub) or **reliable but slow** (persistent queues). Forja gives you both.
 
