@@ -17,7 +17,6 @@ defmodule Forja.Processor do
 
   alias Forja.AdvisoryLock
   alias Forja.Config
-  alias Forja.DeadLetter
   alias Forja.Event
   alias Forja.Registry
   alias Forja.Telemetry
@@ -75,7 +74,7 @@ defmodule Forja.Processor do
     end
   end
 
-  defp dispatch_to_handlers(config, name, event, path) do
+  defp dispatch_to_handlers(_config, name, event, path) do
     handlers = Registry.handlers_for(name, event.type)
 
     Process.put(:forja_correlation_id, event.correlation_id)
@@ -84,9 +83,9 @@ defmodule Forja.Processor do
     errors =
       Enum.flat_map(handlers, fn handler ->
         start_time = System.monotonic_time()
+        meta = %{forja_name: name, path: path, correlation_id: event.correlation_id, causation_id: event.id}
 
         try do
-          meta = %{forja_name: name, path: path, correlation_id: event.correlation_id, causation_id: event.id}
 
           case handler.handle_event(event, meta) do
             :ok ->
@@ -101,7 +100,7 @@ defmodule Forja.Processor do
               )
 
               Telemetry.emit_failed(name, event.type, handler, path, reason)
-              DeadLetter.maybe_notify(config.dead_letter, event, {:handler_failed, handler, reason})
+              maybe_on_failure(handler, event, {:error, reason}, meta)
               [{:error, reason}]
           end
         rescue
@@ -112,7 +111,7 @@ defmodule Forja.Processor do
             )
 
             Telemetry.emit_failed(name, event.type, handler, path, exception)
-            DeadLetter.maybe_notify(config.dead_letter, event, {:handler_raised, handler, exception})
+            maybe_on_failure(handler, event, {:raised, exception}, meta)
             [{:error, exception}]
         end
       end)
@@ -130,5 +129,19 @@ defmodule Forja.Processor do
     event
     |> Event.mark_processed_changeset()
     |> config.repo.update!()
+  end
+
+  defp maybe_on_failure(handler, event, reason, meta) do
+    if function_exported?(handler, :on_failure, 3) do
+      try do
+        handler.on_failure(event, reason, meta)
+      rescue
+        exception ->
+          Logger.error(
+            "Forja: on_failure/3 raised in #{inspect(handler)} for event #{event.id}: #{Exception.message(exception)}",
+            domain: [:forja]
+          )
+      end
+    end
   end
 end

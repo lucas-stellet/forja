@@ -17,10 +17,10 @@ defmodule Forja.Handler do
   in edge cases (e.g., network partitions, consumer crashes). Even if a handler
   returns an error, the event is considered processed and will not be retried.
 
-  When a handler fails (returns `{:error, reason}` or raises), the configured
-  `Forja.DeadLetter` callback is invoked with the reason `{:handler_failed, handler, reason}`
-  or `{:handler_raised, handler, exception}`. This gives you a hook to alert,
-  log to Sentry, or enqueue a retry — without changing the Processor's semantics.
+  When a handler fails, the optional `on_failure/3` callback is invoked with the
+  event, reason, and metadata. Use this to enqueue retries, emit compensating
+  events, or alert. If `on_failure/3` is not implemented, the failure is logged
+  and telemetry is emitted — no further action is taken.
 
   ## Example
 
@@ -78,4 +78,31 @@ defmodule Forja.Handler do
       {:error, :some_failure}
   """
   @callback handle_event(event :: Forja.Event.t(), meta :: map()) :: :ok | {:error, term()}
+
+  @doc """
+  Called when `handle_event/2` returns `{:error, reason}` or raises an exception.
+
+  The `reason` is one of:
+    - `{:error, term()}` — handler returned an error
+    - `{:raised, Exception.t()}` — handler raised an exception
+
+  Use this to enqueue retries, emit compensating events, or alert external systems.
+  This callback is optional — if not implemented, failures are only logged and emitted
+  as telemetry.
+
+  ## Example
+
+      @impl true
+      def on_failure(%Forja.Event{} = event, {:error, :timeout}, _meta) do
+        # Enqueue a retry as a dedicated Oban worker
+        %{event_id: event.id}
+        |> MyApp.Workers.RetryNotification.new()
+        |> Oban.insert()
+      end
+
+      def on_failure(_event, _reason, _meta), do: :ok
+  """
+  @callback on_failure(event :: Forja.Event.t(), reason :: term(), meta :: map()) :: :ok | term()
+
+  @optional_callbacks [on_failure: 3]
 end

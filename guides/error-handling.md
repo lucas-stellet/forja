@@ -157,66 +157,144 @@ defmodule MyApp.Events.PaymentHandler do
 end
 ```
 
-## Automatic DeadLetter notification on handler failure
+## Reacting to failures with `on_failure/3`
 
-When any handler returns `{:error, reason}` or raises an exception, Forja automatically calls the configured `DeadLetter` callback with the failure details. The reason tuple includes the handler module so you can distinguish which handler failed:
+When a handler fails, Forja calls the optional `on_failure/3` callback on the same handler module. This lets each handler decide how to react to its own failures — enqueue a retry, emit a compensating event, or alert.
 
-- `{:handler_failed, MyApp.OrderNotifier, :timeout}` — handler returned an error
-- `{:handler_raised, MyApp.OrderNotifier, %RuntimeError{}}` — handler raised an exception
+```elixir
+defmodule MyApp.Events.OrderNotifier do
+  @behaviour Forja.Handler
 
-This happens **in addition to** the telemetry event and log. You don't need to do anything extra — just configure a `DeadLetter` module and it receives all handler failures automatically.
+  @impl true
+  def event_types, do: ["order:created"]
 
-## Using DeadLetter for alerting and recovery
+  @impl true
+  def handle_event(%Forja.Event{payload: payload}, _meta) do
+    case MyApp.Mailer.send_confirmation(payload["email"]) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-Configure a `DeadLetter` module to react to handler failures:
+  @impl true
+  def on_failure(%Forja.Event{} = event, {:error, :timeout}, _meta) do
+    # Transient — enqueue a retry
+    %{event_id: event.id, email: event.payload["email"]}
+    |> MyApp.Workers.RetryEmail.new(max_attempts: 5)
+    |> Oban.insert()
+  end
+
+  def on_failure(%Forja.Event{} = event, {:error, :invalid_email}, _meta) do
+    # Permanent — alert, don't retry
+    Sentry.capture_message("Invalid email for event #{event.id}")
+  end
+
+  def on_failure(_event, _reason, _meta), do: :ok
+end
+```
+
+The `reason` argument is one of:
+
+- `{:error, term()}` — the handler returned `{:error, reason}`
+- `{:raised, Exception.t()}` — the handler raised an exception
+
+If `on_failure/3` is not implemented, nothing extra happens — the failure is logged and `[:forja, :event, :failed]` telemetry is emitted as usual.
+
+If `on_failure/3` itself raises, the exception is caught and logged. It does not affect other handlers or the event's processing status.
+
+## Multi-step workflows with Sage
+
+When a handler orchestrates multiple steps that need **compensation on failure** (undo previous steps if a later step fails), use [Sage](https://hex.pm/packages/sage) inside the handler. Forja delivers the event; Sage manages the transaction chain.
+
+```elixir
+defmodule MyApp.Events.IncorporationHandler do
+  @behaviour Forja.Handler
+
+  @impl true
+  def event_types, do: ["payment:succeeded"]
+
+  @impl true
+  def handle_event(%Forja.Event{payload: payload}, _meta) do
+    app_id = payload["application_id"]
+
+    result =
+      Sage.new()
+      |> Sage.run(:create_users,
+        fn _effects, _ -> MyApp.Accounts.create_from_application(app_id) end,
+        fn users, _, _ -> MyApp.Accounts.delete_users(users) end
+      )
+      |> Sage.run(:update_status,
+        fn _effects, _ -> MyApp.Applications.transition(app_id, :paid) end,
+        fn _, _, _ -> MyApp.Applications.transition(app_id, :pending) end
+      )
+      |> Sage.run(:request_documents,
+        fn _effects, _ -> MyApp.Zendesk.request_documents(app_id) end,
+        fn _, _, _ -> :ok end
+      )
+      |> Sage.execute(%{})
+
+    case result do
+      {:ok, _effects} ->
+        Forja.emit(:my_app, MyApp.Events.IncorporationStarted,
+          payload: %{application_id: app_id}
+        )
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @impl true
+  def on_failure(%Forja.Event{payload: payload}, _reason, _meta) do
+    Forja.emit(:my_app, MyApp.Events.IncorporationFailed,
+      payload: %{application_id: payload["application_id"]}
+    )
+  end
+end
+```
+
+The flow:
+
+1. `PaymentSucceeded` triggers the handler
+2. Sage runs 3 steps: create users → update status → request documents
+3. If `request_documents` fails, Sage automatically reverses `update_status` and deletes the created users
+4. The handler returns `{:error, reason}` → Forja calls `on_failure/3`
+5. `on_failure/3` emits `IncorporationFailed` (with correlation inherited)
+6. The entire chain is traceable via `correlation_id`
+
+Sage is a separate dependency (`{:sage, "~> 0.6"}`). Forja does not depend on it — the integration happens naturally in handler code.
+
+## DeadLetter: the last resort
+
+`Forja.DeadLetter` is for a different scenario: the **event itself** could not be processed after all Oban retries or reconciliation attempts. This is the "end of the line" — the event bus gave up.
 
 ```elixir
 defmodule MyApp.DeadLetterHandler do
   @behaviour Forja.DeadLetter
 
-  require Logger
-
   @impl true
-  def handle_dead_letter(%Forja.Event{} = event, {:handler_failed, handler, reason}) do
-    Logger.error("Handler #{inspect(handler)} failed for #{event.type}: #{inspect(reason)}")
-    Sentry.capture_message("Handler failed",
-      extra: %{event_id: event.id, handler: inspect(handler), reason: inspect(reason)}
-    )
-    :ok
-  end
-
-  def handle_dead_letter(%Forja.Event{} = event, {:handler_raised, handler, exception}) do
-    Logger.error("Handler #{inspect(handler)} raised for #{event.type}: #{Exception.message(exception)}")
-    Sentry.capture_exception(exception,
-      extra: %{event_id: event.id, handler: inspect(handler)}
-    )
-    :ok
-  end
-
   def handle_dead_letter(%Forja.Event{} = event, reason) do
     Logger.error("Dead letter: #{event.type} (#{event.id}): #{inspect(reason)}")
+    Sentry.capture_message("Event dead-lettered", extra: %{event_id: event.id})
     :ok
   end
 end
 ```
 
-Configure it in the Forja supervision tree:
-
-```elixir
-{Forja,
- name: :my_app,
- repo: MyApp.Repo,
- pubsub: MyApp.PubSub,
- handlers: [MyApp.Events.PaymentHandler],
- dead_letter: MyApp.DeadLetterHandler}
-```
+| Callback | When it fires | Purpose |
+|----------|--------------|---------|
+| `on_failure/3` | A specific handler failed | Handler-level recovery (retry, compensate, alert) |
+| `DeadLetter` | Oban discarded the job or reconciliation gave up | Event-level last resort (the bus gave up entirely) |
 
 ## Summary
 
 | Scenario | Approach |
 |----------|----------|
 | Local, fast, unlikely to fail | Logic directly in handler |
-| External service, can fail transiently | Dedicated Oban worker |
+| External service, can fail transiently | Dedicated Oban worker or `on_failure/3` retry |
+| Multi-step with compensation | Sage inside handler |
 | Domain reaction to event | `Forja.emit/3` inside handler |
 | Data + event atomically | `Forja.emit_multi/4` inside handler |
-| Unrecoverable failure | `Forja.DeadLetter` behaviour |
+| Handler-level failure recovery | `on_failure/3` callback |
+| Event-level unrecoverable failure | `Forja.DeadLetter` behaviour |
