@@ -93,16 +93,16 @@ if Code.ensure_loaded?(Igniter) do
         {:ok, igniter, repo} ->
           pubsub = resolve_pubsub(igniter, opts[:pubsub])
 
-          forja_child =
+          forja_opts =
             quote do
-              {Forja,
-               name: unquote(app_name),
+              [name: unquote(app_name),
                repo: unquote(repo),
                pubsub: unquote(pubsub),
-               handlers: []}
+               handlers: []]
             end
 
           migration_body = """
+          def change do
             create table(:forja_events, primary_key: false) do
               add :id, :binary_id, primary_key: true
               add :type, :string, null: false
@@ -135,20 +135,47 @@ if Code.ensure_loaded?(Igniter) do
                      where: "processed_at IS NULL",
                      name: :forja_events_reconciliation
                    )
+          end
           """
 
-          {igniter, _migration_path} =
+          oban_child =
+            quote do
+              Application.fetch_env!(unquote(app_name), Oban)
+            end
+
+          oban_migration_body = """
+          def up, do: Oban.Migration.up()
+          def down, do: Oban.Migration.down()
+          """
+
+          now = NaiveDateTime.utc_now()
+          oban_ts = Calendar.strftime(now, "%Y%m%d%H%M%S")
+          forja_ts = Calendar.strftime(NaiveDateTime.add(now, 1, :second), "%Y%m%d%H%M%S")
+
+          igniter =
+            IgniterEcto.gen_migration(igniter, repo, "add_oban_jobs_table",
+              body: oban_migration_body,
+              on_exists: :skip,
+              timestamp: oban_ts
+            )
+
+          igniter =
             IgniterEcto.gen_migration(igniter, repo, "create_forja_events",
               body: migration_body,
-              on_exists: :skip
+              on_exists: :skip,
+              timestamp: forja_ts
             )
 
           igniter
           |> IgniterApp.add_new_child(
-            {Forja, {:code, forja_child}},
-            after: [repo]
+            {Oban, {:code, oban_child}},
+            after: [repo, Phoenix.PubSub]
           )
-          |> configure_oban_queues(app_name)
+          |> IgniterApp.add_new_child(
+            {Forja, {:code, forja_opts}},
+            after: [repo, Phoenix.PubSub, Oban]
+          )
+          |> configure_oban(app_name, repo)
           |> maybe_configure_reconciliation_crontab(app_name, opts[:reconciliation])
           |> IgniterFormatter.import_dep(:forja)
           |> Igniter.add_notice("""
@@ -157,10 +184,11 @@ if Code.ensure_loaded?(Igniter) do
 
           Next steps:
 
-            1. Run `mix ecto.migrate` to create the forja_events table
+            1. Run `mix ecto.migrate` to create the oban_jobs and forja_events tables
             2. Add your event handler modules to the `handlers` list in the
                Forja supervision tree entry in your application.ex
-            3. Verify Oban is configured with :forja_events and :forja_reconciliation queues
+            3. Configure Oban testing mode in config/test.exs:
+               config :#{app_name}, Oban, testing: :inline
 
           For more information, see: https://hexdocs.pm/forja
           """)
@@ -218,8 +246,15 @@ if Code.ensure_loaded?(Igniter) do
       IgniterModule.parse(pubsub_string)
     end
 
-    defp configure_oban_queues(igniter, app_name) do
+    defp configure_oban(igniter, app_name, repo) do
       igniter
+      |> IgniterConfig.configure(
+        "config.exs",
+        app_name,
+        [Oban, :repo],
+        {:code, Macro.to_string(repo) |> Code.string_to_quoted!()},
+        updater: fn zipper -> {:ok, zipper} end
+      )
       |> IgniterConfig.configure(
         "config.exs",
         app_name,
@@ -232,6 +267,13 @@ if Code.ensure_loaded?(Igniter) do
         app_name,
         [Oban, :queues, :forja_reconciliation],
         1,
+        updater: fn zipper -> {:ok, zipper} end
+      )
+      |> IgniterConfig.configure(
+        "test.exs",
+        app_name,
+        [Oban, :testing],
+        :inline,
         updater: fn zipper -> {:ok, zipper} end
       )
     end
