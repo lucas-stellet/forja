@@ -39,7 +39,7 @@ defmodule Forja.MixProject do
       {:phoenix_pubsub, "~> 2.1"},
       {:telemetry, "~> 1.3"},
       {:jason, "~> 1.4"},
-      {:zoi, "~> 0.17", optional: true},
+      {:zoi, "~> 0.17"},
 
       # Code generation / installer
       {:igniter, "~> 0.7", optional: true},

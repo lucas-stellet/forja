@@ -18,7 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Payload fields are required by default in schema definitions
 - `emit/3` and `emit_multi/4` accept schema modules as the type argument
 - Testing helpers accept schema modules in addition to string types
-- Zoi as optional dependency (only needed when using `Forja.Event.Schema`)
+- Zoi as required dependency for event schema validation
+
+### Changed
+
+- `emit/3` and `emit_multi/4` now require a `Forja.Event.Schema` module (string-based emission removed)
 
 ## [0.1.0] - 2026-03-26
 

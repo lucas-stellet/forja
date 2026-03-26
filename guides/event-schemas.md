@@ -193,11 +193,4 @@ Every event emitted through Forja is validated against its schema module, so han
 {:zoi, "~> 0.17", optional: true}
 ```
 
-If Zoi is not in your dependencies, compiling a schema module raises a `CompileError`:
-
-```
-** (CompileError) Zoi is required for Forja.Event.Schema.
-Add {:zoi, "~> 0.17"} to your deps.
-```
-
-Zoi is required since all events must be defined as schema modules.
+Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.2"}` to your deps.
