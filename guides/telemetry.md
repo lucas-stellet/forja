@@ -67,7 +67,73 @@ Emitted with the GenStage producer buffer size.
 - **Measurements:** `%{size: non_neg_integer}`
 - **Metadata:** `%{name: atom}`
 
-## Attaching handlers
+## Default Logger
+
+Forja ships with an opt-in default logger that converts telemetry events into structured `Logger` calls. Add it to your `application.ex`:
+
+```elixir
+def start(_type, _args) do
+  Forja.Telemetry.attach_default_logger(level: :info)
+
+  children = [
+    # ...
+  ]
+
+  Supervisor.start_link(children, strategy: :one_for_one)
+end
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `:level` | `:info` | Controls which categories of events are logged (see tiers below) |
+| `:include_payload` | `false` | Include event payload in `:emitted` log entries |
+| `:encode` | `false` | JSON-encode the log output |
+| `:events` | `:all` | `:all` (uses level tier) or explicit list like `[:emitted, :failed]` |
+
+### Level Tiers
+
+The `:level` option determines which event categories are logged:
+
+| Level | Events logged |
+|-------|---------------|
+| `:debug` | All events (emitted, processed, skipped, deduplicated, reconciled, failed, dead_letter, abandoned) |
+| `:info` | Lifecycle + problems (emitted, processed, reconciled, failed, dead_letter, abandoned) |
+| `:warning` | Problems only (failed, dead_letter, abandoned) |
+| `:error` | Critical only (dead_letter, abandoned) |
+
+Each event is logged at a Logger level matching its severity: `:info` for lifecycle events, `:debug` for internal details, `:warning` for failures, `:error` for critical issues.
+
+### Examples
+
+```elixir
+# Development: see everything including event payloads
+Forja.Telemetry.attach_default_logger(level: :debug, include_payload: true)
+
+# Production: only problems, JSON-encoded
+Forja.Telemetry.attach_default_logger(level: :warning, encode: true)
+
+# Custom: only specific event categories
+Forja.Telemetry.attach_default_logger(events: [:emitted, :failed, :dead_letter])
+```
+
+### Detaching
+
+```elixir
+Forja.Telemetry.detach_default_logger()
+```
+
+### Filtering via Logger domain
+
+All log calls use `domain: [:forja]`, enabling Erlang logger filters:
+
+```elixir
+# Suppress all Forja logs
+:logger.add_primary_filter(:no_forja, {&:logger_filters.domain/2, {:stop, :sub, [:forja]}})
+```
+
+## Attaching custom handlers
 
 ```elixir
 :telemetry.attach_many(
@@ -115,11 +181,13 @@ defmodule MyApp.ForjaMetrics do
 end
 ```
 
-## Example: Logger
+## Example: Custom Logger
+
+If you need more control than the default logger provides, attach your own handler:
 
 ```elixir
 :telemetry.attach(
-  "forja-logger",
+  "forja-custom-logger",
   [:forja, :event, :dead_letter],
   fn _event, _measurements, metadata, _config ->
     require Logger

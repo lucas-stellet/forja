@@ -173,7 +173,7 @@ defmodule Forja do
     case config.repo.transaction(multi) do
       {:ok, %{event: event}} ->
         after_emit(config, name, event)
-        Telemetry.emit_emitted(name, attrs.type, attrs.source)
+        Telemetry.emit_emitted(name, attrs.type, attrs.source, attrs.payload)
         {:ok, event}
 
       {:error, :event, changeset, _changes} ->

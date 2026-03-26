@@ -59,7 +59,7 @@ defmodule Forja.Processor do
   defp do_process(config, name, event_id, path) do
     case config.repo.get(Event, event_id) do
       nil ->
-        Logger.warning("Forja: event #{event_id} not found in database")
+        Logger.warning("Forja: event #{event_id} not found in database", domain: [:forja])
         :ok
 
       %Event{processed_at: processed_at} when not is_nil(processed_at) ->
@@ -90,7 +90,8 @@ defmodule Forja.Processor do
 
             {:error, reason} ->
               Logger.error(
-                "Forja: handler #{inspect(handler)} returned error for event #{event.id}: #{inspect(reason)}"
+                "Forja: handler #{inspect(handler)} returned error for event #{event.id}: #{inspect(reason)}",
+                domain: [:forja]
               )
 
               Telemetry.emit_failed(name, event.type, handler, path, reason)
@@ -99,7 +100,8 @@ defmodule Forja.Processor do
         rescue
           exception ->
             Logger.error(
-              "Forja: handler #{inspect(handler)} raised for event #{event.id}: #{Exception.message(exception)}"
+              "Forja: handler #{inspect(handler)} raised for event #{event.id}: #{Exception.message(exception)}",
+              domain: [:forja]
             )
 
             Telemetry.emit_failed(name, event.type, handler, path, exception)
