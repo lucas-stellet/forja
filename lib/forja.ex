@@ -176,6 +176,8 @@ defmodule Forja do
   end
 
   defp resolve_event_type(schema_module, opts) when is_atom(schema_module) do
+    Code.ensure_loaded(schema_module)
+
     unless function_exported?(schema_module, :__forja_event_schema__, 0) do
       raise ArgumentError,
             "#{inspect(schema_module)} is not a Forja.Event.Schema module. " <>

@@ -161,6 +161,8 @@ defmodule Forja.Testing do
   defp resolve_type_string(type) when is_binary(type), do: type
 
   defp resolve_type_string(module) when is_atom(module) do
+    Code.ensure_loaded(module)
+
     if function_exported?(module, :event_type, 0) do
       module.event_type()
     else
