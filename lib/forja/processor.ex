@@ -36,9 +36,11 @@ defmodule Forja.Processor do
   @spec process(atom(), String.t(), atom()) :: :ok | {:skipped, :locked} | {:error, term()}
   def process(name, event_id, path) do
     config = Config.get(name)
-    lock_result = AdvisoryLock.with_lock(config.repo, {:forja_event, event_id}, fn ->
-      do_process(config, name, event_id, path)
-    end)
+
+    lock_result =
+      AdvisoryLock.with_lock(config.repo, {:forja_event, event_id}, fn ->
+        do_process(config, name, event_id, path)
+      end)
 
     case lock_result do
       {:ok, :ok} ->

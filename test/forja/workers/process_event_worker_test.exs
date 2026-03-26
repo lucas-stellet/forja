@@ -75,7 +75,10 @@ defmodule Forja.Workers.ProcessEventWorkerTest do
 
     test "cancels job when forja_name is not a known atom" do
       job = %Oban.Job{
-        args: %{"event_id" => Ecto.UUID.generate(), "forja_name" => "nonexistent_forja_instance_xyz"}
+        args: %{
+          "event_id" => Ecto.UUID.generate(),
+          "forja_name" => "nonexistent_forja_instance_xyz"
+        }
       }
 
       assert {:cancel, _reason} = ProcessEventWorker.perform(job)

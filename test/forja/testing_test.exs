@@ -138,7 +138,12 @@ defmodule Forja.TestingTest do
 
   defp insert_event_with_key!(type, payload, idempotency_key) do
     %Event{}
-    |> Event.changeset(%{type: type, payload: payload, meta: %{}, idempotency_key: idempotency_key})
+    |> Event.changeset(%{
+      type: type,
+      payload: payload,
+      meta: %{},
+      idempotency_key: idempotency_key
+    })
     |> Repo.insert!()
   end
 end

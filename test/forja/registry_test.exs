@@ -69,7 +69,11 @@ defmodule Forja.RegistryTest do
       {table, catch_all} = Registry.build([OrderHandler, NotificationHandler])
       Registry.store(:registry_test, table, catch_all)
 
-      assert Registry.handlers_for(:registry_test, "order:created") == [OrderHandler, NotificationHandler]
+      assert Registry.handlers_for(:registry_test, "order:created") == [
+               OrderHandler,
+               NotificationHandler
+             ]
+
       assert Registry.handlers_for(:registry_test, "order:cancelled") == [OrderHandler]
     end
 

@@ -16,7 +16,8 @@ defmodule Forja.MixProject do
       package: package(),
       name: "Forja",
       docs: docs(),
-      description: "Event Bus with dual-path processing for Elixir -- PubSub latency with Oban guarantees."
+      description:
+        "Event Bus with dual-path processing for Elixir -- PubSub latency with Oban guarantees."
     ]
   end
 
@@ -38,10 +39,10 @@ defmodule Forja.MixProject do
       {:phoenix_pubsub, "~> 2.1"},
       {:telemetry, "~> 1.3"},
       {:jason, "~> 1.4"},
+      {:zoi, "~> 0.17", optional: true},
 
       # Code generation / installer
       {:igniter, "~> 0.7", optional: true},
-
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
@@ -79,6 +80,7 @@ defmodule Forja.MixProject do
       "guides/telemetry.md",
       "guides/testing.md",
       "guides/for-agents.md",
+      "guides/event-schemas.md",
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end
@@ -99,7 +101,9 @@ defmodule Forja.MixProject do
       ],
       "Handlers & Behaviours": [
         Forja.Handler,
-        Forja.DeadLetter
+        Forja.DeadLetter,
+        Forja.Event.Schema,
+        Forja.ValidationError
       ],
       Infrastructure: [
         Forja.Processor,

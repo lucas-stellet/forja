@@ -94,7 +94,12 @@ defmodule Forja.Workers.ReconciliationWorkerTest do
           repo: Repo,
           pubsub: Forja.TestPubSub,
           handlers: [ReconciliationTestHandler],
-          reconciliation: [enabled: true, interval_minutes: 60, threshold_minutes: 60, max_retries: 3]
+          reconciliation: [
+            enabled: true,
+            interval_minutes: 60,
+            threshold_minutes: 60,
+            max_retries: 3
+          ]
         )
 
       Config.store(config)

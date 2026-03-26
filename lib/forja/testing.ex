@@ -45,8 +45,9 @@ defmodule Forja.Testing do
 
   Optionally verifies that the payload contains the specified fields.
   """
-  @spec assert_event_emitted(atom(), String.t(), map()) :: Event.t()
+  @spec assert_event_emitted(atom(), String.t() | module(), map()) :: Event.t()
   def assert_event_emitted(name, type, payload_match \\ %{}) do
+    type = resolve_type_string(type)
     config = Config.get(name)
     events = fetch_events(config.repo, type)
 
@@ -66,8 +67,9 @@ defmodule Forja.Testing do
   @doc """
   Asserts that NO event of the specified type was emitted in the `name` instance.
   """
-  @spec refute_event_emitted(atom(), String.t()) :: :ok
+  @spec refute_event_emitted(atom(), String.t() | module()) :: :ok
   def refute_event_emitted(name, type) do
+    type = resolve_type_string(type)
     config = Config.get(name)
     events = fetch_events(config.repo, type)
 
@@ -110,9 +112,7 @@ defmodule Forja.Testing do
     config = Config.get(name)
 
     events =
-      config.repo.all(
-        from(e in Event, where: e.idempotency_key == ^idempotency_key)
-      )
+      config.repo.all(from(e in Event, where: e.idempotency_key == ^idempotency_key))
 
     assert length(events) == 1,
            "Expected exactly 1 event with idempotency_key #{inspect(idempotency_key)}, " <>
@@ -126,8 +126,10 @@ defmodule Forja.Testing do
 
   Useful for testing handlers in isolation without emitting real events.
   """
-  @spec invoke_handler(module(), String.t(), map(), map()) :: :ok | {:error, term()}
+  @spec invoke_handler(module(), String.t() | module(), map(), map()) :: :ok | {:error, term()}
   def invoke_handler(handler_module, type, payload \\ %{}, meta \\ %{}) do
+    type = resolve_type_string(type)
+
     event = %Event{
       id: Ecto.UUID.generate(),
       type: type,
@@ -140,9 +142,7 @@ defmodule Forja.Testing do
   end
 
   defp fetch_events(repo, type) do
-    repo.all(
-      from(e in Event, where: e.type == ^type, order_by: [asc: e.inserted_at])
-    )
+    repo.all(from(e in Event, where: e.type == ^type, order_by: [asc: e.inserted_at]))
   end
 
   defp filter_by_payload(events, payload_match) when map_size(payload_match) == 0 do
@@ -156,5 +156,15 @@ defmodule Forja.Testing do
         Map.get(event.payload, string_key) == value
       end)
     end)
+  end
+
+  defp resolve_type_string(type) when is_binary(type), do: type
+
+  defp resolve_type_string(module) when is_atom(module) do
+    if function_exported?(module, :event_type, 0) do
+      module.event_type()
+    else
+      raise ArgumentError, "#{inspect(module)} does not export event_type/0"
+    end
   end
 end

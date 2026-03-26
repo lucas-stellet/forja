@@ -139,9 +139,7 @@ defmodule ForjaTest do
     test "supports static payload" do
       multi =
         Ecto.Multi.new()
-        |> Forja.emit_multi(:emit_test, "emit_test:multi",
-          payload: %{"static" => true}
-        )
+        |> Forja.emit_multi(:emit_test, "emit_test:multi", payload: %{"static" => true})
 
       assert {:ok, result} = Repo.transaction(multi)
       assert result[:"forja_event_emit_test:multi"].payload == %{"static" => true}

@@ -95,10 +95,12 @@ if Code.ensure_loaded?(Igniter) do
 
           forja_opts =
             quote do
-              [name: unquote(app_name),
-               repo: unquote(repo),
-               pubsub: unquote(pubsub),
-               handlers: []]
+              [
+                name: unquote(app_name),
+                repo: unquote(repo),
+                pubsub: unquote(pubsub),
+                handlers: []
+              ]
             end
 
           migration_body = """
@@ -112,6 +114,7 @@ if Code.ensure_loaded?(Igniter) do
               add :processed_at, :utc_datetime_usec
               add :idempotency_key, :string
               add :reconciliation_attempts, :integer, default: 0, null: false
+              add :schema_version, :integer, default: 1, null: false
 
               timestamps(type: :utc_datetime_usec, updated_at: false)
             end

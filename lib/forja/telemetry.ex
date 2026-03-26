@@ -16,9 +16,9 @@ defmodule Forja.Telemetry do
 
   | Level      | Events logged                                                     |
   |------------|-------------------------------------------------------------------|
-  | `:debug`   | All events (emitted, processed, skipped, deduplicated, reconciled, failed, dead_letter, abandoned) |
-  | `:info`    | Lifecycle + problems (emitted, processed, reconciled, failed, dead_letter, abandoned) |
-  | `:warning` | Problems only (failed, dead_letter, abandoned)                    |
+  | `:debug`   | All events (emitted, processed, skipped, deduplicated, reconciled, failed, validation_failed, dead_letter, abandoned) |
+  | `:info`    | Lifecycle + problems (emitted, processed, reconciled, failed, validation_failed, dead_letter, abandoned) |
+  | `:warning` | Problems only (failed, validation_failed, dead_letter, abandoned) |
   | `:error`   | Critical only (dead_letter, abandoned)                            |
 
   ### Options
@@ -75,6 +75,10 @@ defmodule Forja.Telemetry do
       * Measurements: `%{count: 1}`
       * Metadata: `%{name: atom, idempotency_key: string, existing_event_id: binary}`
 
+    * `[:forja, :event, :validation_failed]` - When payload validation fails at emit-time
+      * Measurements: `%{count: 1}`
+      * Metadata: `%{name: atom, type: string | module, errors: term}`
+
     * `[:forja, :producer, :buffer_size]` - Producer buffer size
       * Measurements: `%{size: non_neg_integer}`
       * Metadata: `%{name: atom}`
@@ -93,6 +97,7 @@ defmodule Forja.Telemetry do
     [:forja, :event, :abandoned],
     [:forja, :event, :reconciled],
     [:forja, :event, :deduplicated],
+    [:forja, :event, :validation_failed],
     [:forja, :producer, :buffer_size]
   ]
 
@@ -106,14 +111,23 @@ defmodule Forja.Telemetry do
     buffer_size: :debug,
     failed: :warning,
     dead_letter: :error,
-    abandoned: :error
+    abandoned: :error,
+    validation_failed: :warning
   }
 
   # Which event categories are included at each tier level
   @level_tiers %{
     debug: Map.keys(@event_levels),
-    info: [:emitted, :processed, :reconciled, :failed, :dead_letter, :abandoned],
-    warning: [:failed, :dead_letter, :abandoned],
+    info: [
+      :emitted,
+      :processed,
+      :reconciled,
+      :failed,
+      :dead_letter,
+      :abandoned,
+      :validation_failed
+    ],
+    warning: [:failed, :dead_letter, :abandoned, :validation_failed],
     error: [:dead_letter, :abandoned]
   }
 
@@ -271,6 +285,18 @@ defmodule Forja.Telemetry do
     end)
   end
 
+  def handle_event([:forja, :event, :validation_failed], _measurements, meta, opts) do
+    log(opts, @event_levels.validation_failed, fn ->
+      %{
+        message: "Event validation failed",
+        event: "event:validation_failed",
+        name: to_string(meta.name),
+        type: inspect(meta.type),
+        errors: inspect(meta.errors)
+      }
+    end)
+  end
+
   def handle_event([:forja, :producer, :buffer_size], measurements, meta, opts) do
     log(opts, @event_levels.buffer_size, fn ->
       %{
@@ -390,6 +416,18 @@ defmodule Forja.Telemetry do
       [:forja, :event, :deduplicated],
       %{count: 1},
       %{name: name, idempotency_key: idempotency_key, existing_event_id: existing_event_id}
+    )
+  end
+
+  @doc """
+  Emits a telemetry event when payload validation fails at emit-time.
+  """
+  @spec emit_validation_failed(atom(), String.t() | module(), [map()]) :: :ok
+  def emit_validation_failed(name, type, errors) do
+    :telemetry.execute(
+      [:forja, :event, :validation_failed],
+      %{count: 1},
+      %{name: name, type: type, errors: errors}
     )
   end
 

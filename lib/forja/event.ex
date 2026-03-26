@@ -15,6 +15,7 @@ defmodule Forja.Event do
   - `processed_at` - UTC datetime when the event was processed
   - `idempotency_key` - Unique key for idempotent event handling
   - `reconciliation_attempts` - Number of reconciliation attempts (default: 0)
+  - `schema_version` - Integer identifying the event schema version (default: 1)
   - `inserted_at` - UTC datetime when the event was created (auto-managed)
 
   ## Examples
@@ -28,13 +29,14 @@ defmodule Forja.Event do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "forja_events" do
-    field :type, :string
-    field :payload, :map, default: %{}
-    field :meta, :map, default: %{}
-    field :source, :string
-    field :processed_at, :utc_datetime_usec
-    field :idempotency_key, :string
-    field :reconciliation_attempts, :integer, default: 0
+    field(:type, :string)
+    field(:payload, :map, default: %{})
+    field(:meta, :map, default: %{})
+    field(:source, :string)
+    field(:processed_at, :utc_datetime_usec)
+    field(:idempotency_key, :string)
+    field(:reconciliation_attempts, :integer, default: 0)
+    field(:schema_version, :integer, default: 1)
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
@@ -48,6 +50,7 @@ defmodule Forja.Event do
           processed_at: DateTime.t() | nil,
           idempotency_key: String.t() | nil,
           reconciliation_attempts: integer(),
+          schema_version: pos_integer(),
           inserted_at: DateTime.t()
         }
 
@@ -68,7 +71,14 @@ defmodule Forja.Event do
   @spec changeset(t() | Ecto.Schema.t(), map()) :: Ecto.Changeset.t()
   def changeset(event, attrs) do
     event
-    |> Ecto.Changeset.cast(attrs, [:type, :payload, :meta, :source, :idempotency_key])
+    |> Ecto.Changeset.cast(attrs, [
+      :type,
+      :payload,
+      :meta,
+      :source,
+      :idempotency_key,
+      :schema_version
+    ])
     |> Ecto.Changeset.validate_required([:type])
     |> Ecto.Changeset.validate_length(:type, min: 1, max: 255)
     |> Ecto.Changeset.unique_constraint(:idempotency_key)

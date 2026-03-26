@@ -58,7 +58,13 @@ defmodule Forja.TelemetryTest do
     Telemetry.emit_failed(:test, "order:created", FakeHandler, :oban, :timeout)
 
     assert_receive {:telemetry, [:forja, :event, :failed], %{count: 1},
-                    %{name: :test, type: "order:created", handler: FakeHandler, path: :oban, reason: :timeout}}
+                    %{
+                      name: :test,
+                      type: "order:created",
+                      handler: FakeHandler,
+                      path: :oban,
+                      reason: :timeout
+                    }}
   end
 
   test "emit_skipped/3 sends telemetry event" do
@@ -71,8 +77,7 @@ defmodule Forja.TelemetryTest do
   test "emit_buffer_size/2 sends telemetry event" do
     Telemetry.emit_buffer_size(:test, 42)
 
-    assert_receive {:telemetry, [:forja, :producer, :buffer_size], %{size: 42},
-                    %{name: :test}}
+    assert_receive {:telemetry, [:forja, :producer, :buffer_size], %{size: 42}, %{name: :test}}
   end
 
   test "emit_dead_letter/3 sends telemetry event" do
@@ -100,7 +105,11 @@ defmodule Forja.TelemetryTest do
     Telemetry.emit_deduplicated(:test, "my-idempotency-key", "existing-event-id")
 
     assert_receive {:telemetry, [:forja, :event, :deduplicated], %{count: 1},
-                    %{name: :test, idempotency_key: "my-idempotency-key", existing_event_id: "existing-event-id"}}
+                    %{
+                      name: :test,
+                      idempotency_key: "my-idempotency-key",
+                      existing_event_id: "existing-event-id"
+                    }}
   end
 end
 

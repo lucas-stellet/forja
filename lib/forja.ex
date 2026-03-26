@@ -27,6 +27,15 @@ defmodule Forja do
         source: "orders"
       )
 
+  ## Schema-validated emission
+
+      Forja.emit(:my_app, MyApp.Events.OrderCreated,
+        payload: %{order_id: order.id, amount_cents: order.total},
+        source: "orders"
+      )
+
+  See `Forja.Event.Schema` for how to define typed event schemas.
+
   ## Idempotent emission
 
       Forja.emit(:my_app, "order:created",
@@ -83,6 +92,11 @@ defmodule Forja do
   @doc """
   Emits an event atomically.
 
+  The `type` argument can be a string event type or a module that uses
+  `Forja.Event.Schema`. When a schema module is passed, the payload is
+  validated against the Zoi schema before persistence. Invalid payloads
+  return `{:error, %Forja.ValidationError{}}` immediately without persisting.
+
   Inside an Ecto.Multi transaction:
   1. Inserts the event into the `forja_events` table
   2. Inserts the Oban `ProcessEventWorker` job
@@ -98,6 +112,13 @@ defmodule Forja do
     * `:source` - String identifying the origin (default: `nil`)
     * `:idempotency_key` - Optional string key for deduplication (default: `nil`)
 
+  ## Schema-based emission
+
+      Forja.emit(:my_app, MyApp.Events.OrderCreated,
+        payload: %{user_id: "uuid-123", amount_cents: 500},
+        source: "checkout"
+      )
+
   ## Idempotency
 
   When `:idempotency_key` is provided, the function checks for an existing event
@@ -108,45 +129,79 @@ defmodule Forja do
       `{:ok, :retrying, existing_event_id}`
     * If not found: emits normally
   """
-  @spec emit(atom(), String.t(), keyword()) ::
+  @spec emit(atom(), String.t() | module(), keyword()) ::
           {:ok, Event.t()}
           | {:ok, :already_processed}
           | {:ok, :retrying, String.t()}
           | {:error, Ecto.Changeset.t()}
+          | {:error, Forja.ValidationError.t()}
   def emit(name, type, opts \\ []) do
     config = Config.get(name)
     idempotency_key = Keyword.get(opts, :idempotency_key)
 
-    attrs =
-      %{
-        type: type,
-        payload: Keyword.get(opts, :payload, %{}),
-        meta: Keyword.get(opts, :meta, %{}),
-        source: Keyword.get(opts, :source)
-      }
-      |> maybe_put_idempotency_key(idempotency_key)
+    case resolve_event_type(type, opts) do
+      {:ok, resolved_type, payload, schema_version} ->
+        attrs =
+          %{
+            type: resolved_type,
+            payload: payload,
+            meta: Keyword.get(opts, :meta, %{}),
+            source: Keyword.get(opts, :source),
+            schema_version: schema_version
+          }
+          |> maybe_put_idempotency_key(idempotency_key)
 
-    case check_idempotency(config, idempotency_key) do
-      :proceed ->
-        do_emit(config, name, attrs)
+        case check_idempotency(config, idempotency_key) do
+          :proceed ->
+            do_emit(config, name, attrs)
 
-      {:already_processed, event} ->
-        Telemetry.emit_deduplicated(name, idempotency_key, event.id)
-        {:ok, :already_processed}
+          {:already_processed, event} ->
+            Telemetry.emit_deduplicated(name, idempotency_key, event.id)
+            {:ok, :already_processed}
 
-      {:retrying, event} ->
-        Telemetry.emit_deduplicated(name, idempotency_key, event.id)
-        reenqueue_event(config, name, event)
-        {:ok, :retrying, event.id}
+          {:retrying, event} ->
+            Telemetry.emit_deduplicated(name, idempotency_key, event.id)
+            reenqueue_event(config, name, event)
+            {:ok, :retrying, event.id}
+        end
+
+      {:error, %Forja.ValidationError{} = validation_error} ->
+        Telemetry.emit_validation_failed(name, type, validation_error.errors)
+        {:error, validation_error}
     end
+  end
+
+  defp resolve_event_type(type, opts) when is_binary(type) do
+    {:ok, type, Keyword.get(opts, :payload, %{}), Keyword.get(opts, :schema_version, 1)}
+  end
+
+  defp resolve_event_type(schema_module, opts) when is_atom(schema_module) do
+    unless function_exported?(schema_module, :__forja_event_schema__, 0) do
+      raise ArgumentError,
+            "#{inspect(schema_module)} is not a Forja.Event.Schema module. " <>
+              "Did you forget `use Forja.Event.Schema`?"
+    end
+
+    raw_payload = Keyword.get(opts, :payload, %{})
+
+    case schema_module.parse_payload(raw_payload) do
+      {:ok, validated} ->
+        string_keyed = stringify_keys(validated)
+        {:ok, schema_module.event_type(), string_keyed, schema_module.schema_version()}
+
+      {:error, errors} ->
+        {:error, Forja.ValidationError.new(schema_module, errors)}
+    end
+  end
+
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end
 
   defp check_idempotency(_config, nil), do: :proceed
 
   defp check_idempotency(config, idempotency_key) do
-    case config.repo.one(
-           from(e in Event, where: e.idempotency_key == ^idempotency_key, limit: 1)
-         ) do
+    case config.repo.one(from(e in Event, where: e.idempotency_key == ^idempotency_key, limit: 1)) do
       nil ->
         :proceed
 
@@ -193,9 +248,12 @@ defmodule Forja do
   @doc """
   Adds event emission steps to an existing `Ecto.Multi`.
 
-  Allows composing event emission atomically with other database operations
-  in the same transaction. The caller is responsible for executing
-  `Repo.transaction/1` on the returned Multi.
+  Like `emit/3`, the `type` argument accepts both string event types and
+  `Forja.Event.Schema` modules. When a schema module is passed, the payload
+  is validated inside the Multi step. If validation fails, the transaction
+  is rolled back with `{:error, step_key, %Forja.ValidationError{}, changes}`.
+
+  The caller is responsible for executing `Repo.transaction/1` on the returned Multi.
 
   ## GenStage fast-path and emit_multi
 
@@ -251,7 +309,7 @@ defmodule Forja do
       )
       |> Repo.transaction()
   """
-  @spec emit_multi(Ecto.Multi.t(), atom(), String.t(), keyword()) :: Ecto.Multi.t()
+  @spec emit_multi(Ecto.Multi.t(), atom(), String.t() | module(), keyword()) :: Ecto.Multi.t()
   def emit_multi(multi, name, type, opts \\ []) do
     payload_fn = Keyword.get(opts, :payload_fn)
     static_payload = Keyword.get(opts, :payload, %{})
@@ -259,8 +317,9 @@ defmodule Forja do
     source = Keyword.get(opts, :source)
     idempotency_key = Keyword.get(opts, :idempotency_key)
 
-    event_key = :"forja_event_#{type}"
-    oban_key = :"forja_oban_#{type}"
+    type_string = resolve_type_string_for_key(type)
+    event_key = :"forja_event_#{type_string}"
+    oban_key = :"forja_oban_#{type_string}"
 
     multi
     |> Ecto.Multi.run(event_key, fn _repo, changes ->
@@ -268,13 +327,27 @@ defmodule Forja do
 
       case check_idempotency(config, idempotency_key) do
         :proceed ->
-          payload = resolve_payload(payload_fn, static_payload, changes)
+          raw_payload = resolve_payload(payload_fn, static_payload, changes)
+          opts_for_resolve = [payload: raw_payload]
 
-          attrs =
-            %{type: type, payload: payload, meta: meta, source: source}
-            |> maybe_put_idempotency_key(idempotency_key)
+          case resolve_event_type(type, opts_for_resolve) do
+            {:ok, resolved_type, validated_payload, schema_version} ->
+              attrs =
+                %{
+                  type: resolved_type,
+                  payload: validated_payload,
+                  meta: meta,
+                  source: source,
+                  schema_version: schema_version
+                }
+                |> maybe_put_idempotency_key(idempotency_key)
 
-          config.repo.insert(Event.changeset(%Event{}, attrs))
+              config.repo.insert(Event.changeset(%Event{}, attrs))
+
+            {:error, %Forja.ValidationError{} = validation_error} ->
+              Telemetry.emit_validation_failed(name, type, validation_error.errors)
+              {:error, validation_error}
+          end
 
         {:already_processed, event} ->
           Telemetry.emit_deduplicated(name, idempotency_key, event.id)
@@ -293,6 +366,9 @@ defmodule Forja do
 
         {:retrying, _event_id} ->
           {:ok, :skipped}
+
+        {:error, %Forja.ValidationError{}} ->
+          {:error, :validation_failed}
 
         %Event{} = event ->
           job_args = %{event_id: event.id, forja_name: Atom.to_string(name)}
@@ -331,9 +407,7 @@ defmodule Forja do
     children = [
       {ObanListener, name: config.name},
       {EventProducer,
-       name: config.name,
-       pubsub: config.pubsub,
-       event_topic_prefix: config.event_topic_prefix},
+       name: config.name, pubsub: config.pubsub, event_topic_prefix: config.event_topic_prefix},
       {EventConsumer,
        name: config.name,
        producer: EventProducer.producer_name(config.name),
@@ -353,6 +427,9 @@ defmodule Forja do
 
   defp maybe_put_idempotency_key(attrs, nil), do: attrs
   defp maybe_put_idempotency_key(attrs, key), do: Map.put(attrs, :idempotency_key, key)
+
+  defp resolve_type_string_for_key(type) when is_binary(type), do: type
+  defp resolve_type_string_for_key(module) when is_atom(module), do: module.event_type()
 
   defp resolve_payload(nil, static_payload, _changes), do: static_payload
   defp resolve_payload(payload_fn, _static_payload, changes), do: payload_fn.(changes)

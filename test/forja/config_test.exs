@@ -54,7 +54,12 @@ defmodule Forja.ConfigTest do
           event_topic_prefix: "billing",
           handlers: [FakeHandler],
           dead_letter: FakeDeadLetter,
-          reconciliation: [enabled: false, interval_minutes: 30, threshold_minutes: 10, max_retries: 5]
+          reconciliation: [
+            enabled: false,
+            interval_minutes: 30,
+            threshold_minutes: 10,
+            max_retries: 5
+          ]
         )
 
       assert config.oban_name == Oban

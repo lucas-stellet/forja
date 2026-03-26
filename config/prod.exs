@@ -1,4 +1,5 @@
 import Config
+
 config :forja, Forja.TestRepo,
   username: System.get_env("DB_USER") || "postgres",
   password: System.get_env("DB_PASSWORD") || "postgres",

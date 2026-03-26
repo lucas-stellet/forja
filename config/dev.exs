@@ -1,4 +1,5 @@
 import Config
+
 config :forja, Forja.TestRepo,
   username: "postgres",
   password: "postgres",
