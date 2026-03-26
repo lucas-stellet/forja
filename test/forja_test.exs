@@ -2,10 +2,10 @@ defmodule ForjaTest do
   use Forja.DataCase, async: false
 
   alias Forja.Event
+  alias Forja.TestEvents.EmitTestCreated
+  alias Forja.TestEvents.EmitTestMulti
 
   defmodule EmitTestHandler do
-    @moduledoc "Test handler for event emission."
-
     @behaviour Forja.Handler
 
     @impl Forja.Handler
@@ -39,13 +39,13 @@ defmodule ForjaTest do
   describe "emit/3" do
     test "persists event and returns it" do
       assert {:ok, event} =
-               Forja.emit(:emit_test, "emit_test:created",
-                 payload: %{"order_id" => "123"},
+               Forja.emit(:emit_test, EmitTestCreated,
+                 payload: %{order_id: "123"},
                  source: "test"
                )
 
       assert event.type == "emit_test:created"
-      assert event.payload == %{"order_id" => "123"}
+      assert event.payload["order_id"] == "123"
       assert event.source == "test"
       assert event.id != nil
 
@@ -54,9 +54,8 @@ defmodule ForjaTest do
     end
 
     test "applies default values for optional fields" do
-      assert {:ok, event} = Forja.emit(:emit_test, "emit_test:created")
+      assert {:ok, event} = Forja.emit(:emit_test, EmitTestCreated, payload: %{})
 
-      assert event.payload == %{}
       assert event.meta == %{}
       assert event.source == nil
     end
@@ -65,8 +64,8 @@ defmodule ForjaTest do
   describe "emit/3 with idempotency_key" do
     test "emits normally when no duplicate exists" do
       assert {:ok, event} =
-               Forja.emit(:emit_test, "emit_test:created",
-                 payload: %{"order_id" => "123"},
+               Forja.emit(:emit_test, EmitTestCreated,
+                 payload: %{order_id: "123"},
                  idempotency_key: "unique-key-abc"
                )
 
@@ -75,23 +74,21 @@ defmodule ForjaTest do
 
     test "returns already_processed when duplicate is processed" do
       {:ok, event} =
-        Forja.emit(:emit_test, "emit_test:created",
-          payload: %{"order_id" => "123"},
+        Forja.emit(:emit_test, EmitTestCreated,
+          payload: %{order_id: "123"},
           idempotency_key: "idem-key-processed"
         )
 
       Repo.update!(Event.mark_processed_changeset(event))
 
       assert {:ok, :already_processed} =
-               Forja.emit(:emit_test, "emit_test:created",
-                 payload: %{"order_id" => "456"},
+               Forja.emit(:emit_test, EmitTestCreated,
+                 payload: %{order_id: "456"},
                  idempotency_key: "idem-key-processed"
                )
     end
 
     test "returns retrying when duplicate is unprocessed" do
-      # Directly insert an event with processed_at: nil to simulate an unprocessed event.
-      # We avoid going through emit/Forja here to prevent GenStage from processing it.
       {:ok, event} =
         %Event{}
         |> Event.changeset(%{
@@ -101,10 +98,9 @@ defmodule ForjaTest do
         })
         |> Repo.insert()
 
-      # processed_at is nil, so emit should return :retrying
       assert {:ok, :retrying, event_id} =
-               Forja.emit(:emit_test, "emit_test:created",
-                 payload: %{"order_id" => "456"},
+               Forja.emit(:emit_test, EmitTestCreated,
+                 payload: %{order_id: "456"},
                  idempotency_key: "idem-key-retrying"
                )
 
@@ -112,8 +108,8 @@ defmodule ForjaTest do
     end
 
     test "emits normally without idempotency_key" do
-      assert {:ok, event1} = Forja.emit(:emit_test, "emit_test:created", payload: %{"a" => 1})
-      assert {:ok, event2} = Forja.emit(:emit_test, "emit_test:created", payload: %{"a" => 1})
+      assert {:ok, event1} = Forja.emit(:emit_test, EmitTestCreated, payload: %{a: 1})
+      assert {:ok, event2} = Forja.emit(:emit_test, EmitTestCreated, payload: %{a: 1})
 
       assert event1.id != event2.id
     end
@@ -126,23 +122,23 @@ defmodule ForjaTest do
         |> Ecto.Multi.run(:setup, fn _repo, _changes ->
           {:ok, %{some_id: "abc"}}
         end)
-        |> Forja.emit_multi(:emit_test, "emit_test:multi",
-          payload_fn: fn %{setup: setup} -> %{"ref" => setup.some_id} end,
+        |> Forja.emit_multi(:emit_test, EmitTestMulti,
+          payload_fn: fn %{setup: setup} -> %{ref: setup.some_id} end,
           source: "multi_test"
         )
 
       assert {:ok, result} = Repo.transaction(multi)
       assert result[:"forja_event_emit_test:multi"].type == "emit_test:multi"
-      assert result[:"forja_event_emit_test:multi"].payload == %{"ref" => "abc"}
+      assert result[:"forja_event_emit_test:multi"].payload["ref"] == "abc"
     end
 
     test "supports static payload" do
       multi =
         Ecto.Multi.new()
-        |> Forja.emit_multi(:emit_test, "emit_test:multi", payload: %{"static" => true})
+        |> Forja.emit_multi(:emit_test, EmitTestMulti, payload: %{static: true})
 
       assert {:ok, result} = Repo.transaction(multi)
-      assert result[:"forja_event_emit_test:multi"].payload == %{"static" => true}
+      assert result[:"forja_event_emit_test:multi"].payload["static"] == true
     end
   end
 end

@@ -103,22 +103,7 @@ Ecto.Multi.new()
 
 The payload is validated before the event is inserted into the database. If validation fails, the multi fails and the transaction rolls back.
 
-## 4. Untyped emission
-
-The string-based `Forja.emit/3` API is still available and skips schema validation entirely:
-
-```elixir
-Forja.emit(:my_app, "order:created",
-  payload: %{"order_id" => "ord-123", "amount_cents" => 4999}
-)
-```
-
-Use this for:
-- Simple notification events with no meaningful payload structure
-- Gradual migration — start emitting a new event without adding a schema until it stabilises
-- Prototyping before committing to a contract
-
-## 5. Why versioning matters
+## 4. Why versioning matters
 
 Persistent event stores keep old events in the database indefinitely. When you replay those events against new handlers, the handlers expect the current payload shape — but the stored payload reflects the shape at the time of emission.
 
@@ -131,7 +116,7 @@ Consider this timeline:
 
 Event-Carried State Transfer requires careful versioning precisely because the payload is the only thing the consumer has access to. Without a versioning strategy, schema evolution breaks replay and reconciliation.
 
-## 6. How versioning works
+## 5. How versioning works
 
 Every schema module carries a `schema_version` integer. When an event is persisted, this integer is stored in the `forja_events.schema_version` column. The original payload is **never modified** in the database.
 
@@ -178,7 +163,7 @@ When an event with `schema_version: 1` is read from the database, Forja calls `u
 
 **Upcasting chain:** If you go from v1 → v2 → v3, implement `upcast/2` for each transition. Forja calls `upcast` with the stored version number, not necessarily `version - 1`, so each function must handle the full transformation from that version.
 
-## 7. Relationship with handlers
+## 6. Relationship with handlers
 
 Handlers receive `Forja.Event` structs regardless of how the event was emitted. A schema-validated event produces the same `Forja.Event` shape as an untyped event — the only difference is that the `payload` field is guaranteed to have passed Zoi validation when it was emitted.
 
@@ -198,9 +183,9 @@ defmodule MyApp.Events.OrderNotifier do
 end
 ```
 
-The validation guarantee applies only to events emitted via a schema module. Events emitted with the string-based API carry whatever payload was passed.
+Every event emitted through Forja is validated against its schema module, so handlers can trust the payload structure.
 
-## 8. Dependency note
+## 7. Dependency note
 
 `Forja.Event.Schema` depends on [Zoi](https://hex.pm/zoi). Zoi is listed as an **optional** dependency in Forja's `mix.exs`:
 
@@ -215,4 +200,4 @@ If Zoi is not in your dependencies, compiling a schema module raises a `CompileE
 Add {:zoi, "~> 0.17"} to your deps.
 ```
 
-You do not need Zoi if you only use the string-based `emit/3` API.
+Zoi is required since all events must be defined as schema modules.

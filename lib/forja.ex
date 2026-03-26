@@ -22,13 +22,6 @@ defmodule Forja do
 
   ## Emitting events
 
-      Forja.emit(:my_app, "order:created",
-        payload: %{"order_id" => order.id},
-        source: "orders"
-      )
-
-  ## Schema-validated emission
-
       Forja.emit(:my_app, MyApp.Events.OrderCreated,
         payload: %{order_id: order.id, amount_cents: order.total},
         source: "orders"
@@ -38,8 +31,8 @@ defmodule Forja do
 
   ## Idempotent emission
 
-      Forja.emit(:my_app, "order:created",
-        payload: %{"order_id" => order.id},
+      Forja.emit(:my_app, MyApp.Events.OrderCreated,
+        payload: %{order_id: order.id, amount_cents: order.total},
         source: "orders",
         idempotency_key: "order-created-\#{order.id}"
       )
@@ -48,8 +41,8 @@ defmodule Forja do
 
       Ecto.Multi.new()
       |> Ecto.Multi.insert(:order, order_changeset)
-      |> Forja.emit_multi(:my_app, "order:created",
-        payload_fn: fn %{order: order} -> %{"order_id" => order.id} end,
+      |> Forja.emit_multi(:my_app, MyApp.Events.OrderCreated,
+        payload_fn: fn %{order: order} -> %{order_id: order.id, amount_cents: order.total} end,
         source: "orders"
       )
       |> Repo.transaction()
@@ -92,10 +85,10 @@ defmodule Forja do
   @doc """
   Emits an event atomically.
 
-  The `type` argument can be a string event type or a module that uses
-  `Forja.Event.Schema`. When a schema module is passed, the payload is
-  validated against the Zoi schema before persistence. Invalid payloads
-  return `{:error, %Forja.ValidationError{}}` immediately without persisting.
+  The `type` argument must be a module that uses `Forja.Event.Schema`.
+  The payload is validated against the Zoi schema before persistence.
+  Invalid payloads return `{:error, %Forja.ValidationError{}}` immediately
+  without persisting.
 
   Inside an Ecto.Multi transaction:
   1. Inserts the event into the `forja_events` table
@@ -129,7 +122,7 @@ defmodule Forja do
       `{:ok, :retrying, existing_event_id}`
     * If not found: emits normally
   """
-  @spec emit(atom(), String.t() | module(), keyword()) ::
+  @spec emit(atom(), module(), keyword()) ::
           {:ok, Event.t()}
           | {:ok, :already_processed}
           | {:ok, :retrying, String.t()}
@@ -169,10 +162,6 @@ defmodule Forja do
         Telemetry.emit_validation_failed(name, type, validation_error.errors)
         {:error, validation_error}
     end
-  end
-
-  defp resolve_event_type(type, opts) when is_binary(type) do
-    {:ok, type, Keyword.get(opts, :payload, %{}), Keyword.get(opts, :schema_version, 1)}
   end
 
   defp resolve_event_type(schema_module, opts) when is_atom(schema_module) do
@@ -250,10 +239,10 @@ defmodule Forja do
   @doc """
   Adds event emission steps to an existing `Ecto.Multi`.
 
-  Like `emit/3`, the `type` argument accepts both string event types and
-  `Forja.Event.Schema` modules. When a schema module is passed, the payload
-  is validated inside the Multi step. If validation fails, the transaction
-  is rolled back with `{:error, step_key, %Forja.ValidationError{}, changes}`.
+  Like `emit/3`, the `type` argument must be a module that uses
+  `Forja.Event.Schema`. The payload is validated inside the Multi step.
+  If validation fails, the transaction is rolled back with
+  `{:error, step_key, %Forja.ValidationError{}, changes}`.
 
   The caller is responsible for executing `Repo.transaction/1` on the returned Multi.
 
@@ -311,7 +300,7 @@ defmodule Forja do
       )
       |> Repo.transaction()
   """
-  @spec emit_multi(Ecto.Multi.t(), atom(), String.t() | module(), keyword()) :: Ecto.Multi.t()
+  @spec emit_multi(Ecto.Multi.t(), atom(), module(), keyword()) :: Ecto.Multi.t()
   def emit_multi(multi, name, type, opts \\ []) do
     payload_fn = Keyword.get(opts, :payload_fn)
     static_payload = Keyword.get(opts, :payload, %{})

@@ -103,20 +103,6 @@ defmodule Forja.EventSchemaEmitTest do
     end
   end
 
-  describe "emit/3 with string type (backward compatibility)" do
-    test "still works unchanged, schema_version defaults to 1" do
-      assert {:ok, event} =
-               Forja.emit(:schema_emit_test, "schema_test:legacy",
-                 payload: %{"order_id" => "123"},
-                 source: "test"
-               )
-
-      assert event.type == "schema_test:legacy"
-      assert event.schema_version == 1
-      assert event.payload == %{"order_id" => "123"}
-    end
-  end
-
   describe "emit_multi/4 with schema module" do
     test "valid payload via static payload -> persisted" do
       multi =
