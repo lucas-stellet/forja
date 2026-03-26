@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-03-26
+
+### Added
+
+- `correlation_id` and `causation_id` fields for event chain tracing
+- Automatic propagation of correlation context when handlers emit new events
+- `correlation_id` included in `[:forja, :event, :emitted]` telemetry metadata
+- `assert_event_caused_by/3` and `assert_same_correlation/1` testing helpers
+- Correlation & Causation IDs section in event-schemas guide
+
 ## [0.2.0] - 2026-03-26
 
 ### Added
