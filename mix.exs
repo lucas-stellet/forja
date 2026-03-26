@@ -81,6 +81,7 @@ defmodule Forja.MixProject do
       "guides/testing.md",
       "guides/for-agents.md",
       "guides/event-schemas.md",
+      "guides/error-handling.md",
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end
