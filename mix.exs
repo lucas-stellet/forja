@@ -1,7 +1,7 @@
 defmodule Forja.MixProject do
   use Mix.Project
 
-  @version "0.1.2"
+  @version "0.1.3"
   @source_url "https://github.com/lucas-stellet/forja"
 
   def project do
@@ -78,6 +78,7 @@ defmodule Forja.MixProject do
       "guides/architecture.md",
       "guides/telemetry.md",
       "guides/testing.md",
+      "guides/for-agents.md",
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end

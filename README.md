@@ -291,6 +291,10 @@ reconciliation: [
 ]
 ```
 
+## For Agents
+
+If you are an AI coding agent implementing Forja, read the [For Agents guide](guides/for-agents.md). It provides step-by-step instructions, best practices, common pitfalls, and verification steps for each integration phase.
+
 ## Architecture
 
 Forja runs as a supervisor with three children:

@@ -234,6 +234,10 @@ defmodule MyApp.OrderTest do
 end
 ```
 
+## Para Agentes
+
+Se voce e um agente de IA implementando Forja, leia o guia [For Agents](guides/for-agents.md). Ele oferece instrucoes passo a passo, melhores praticas, armadilhas comuns e verificacoes para cada fase da integracao.
+
 ## Telemetria
 
 | Evento | Significado |
