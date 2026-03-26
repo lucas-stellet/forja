@@ -1,5 +1,8 @@
 # Forja
 
+<img width="480" height="480" alt="forja-logo" src="https://github.com/user-attachments/assets/f064600a-7a80-478f-92bb-31ff1ecf418a" />
+
+
 [![Hex.pm](https://img.shields.io/hexpm/v/forja.svg)](https://hex.pm/packages/forja)
 [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/forja)
 [![License](https://img.shields.io/hexpm/l/forja.svg)](LICENSE)
