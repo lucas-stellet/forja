@@ -17,8 +17,10 @@ defmodule Forja.Handler do
   in edge cases (e.g., network partitions, consumer crashes). Even if a handler
   returns an error, the event is considered processed and will not be retried.
 
-  If you need to handle failures permanently, use `Forja.DeadLetter` to capture
-  events that could not be processed.
+  When a handler fails (returns `{:error, reason}` or raises), the configured
+  `Forja.DeadLetter` callback is invoked with the reason `{:handler_failed, handler, reason}`
+  or `{:handler_raised, handler, exception}`. This gives you a hook to alert,
+  log to Sentry, or enqueue a retry — without changing the Processor's semantics.
 
   ## Example
 

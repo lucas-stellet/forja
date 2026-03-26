@@ -17,6 +17,7 @@ defmodule Forja.Processor do
 
   alias Forja.AdvisoryLock
   alias Forja.Config
+  alias Forja.DeadLetter
   alias Forja.Event
   alias Forja.Registry
   alias Forja.Telemetry
@@ -74,7 +75,7 @@ defmodule Forja.Processor do
     end
   end
 
-  defp dispatch_to_handlers(_config, name, event, path) do
+  defp dispatch_to_handlers(config, name, event, path) do
     handlers = Registry.handlers_for(name, event.type)
 
     Process.put(:forja_correlation_id, event.correlation_id)
@@ -100,6 +101,7 @@ defmodule Forja.Processor do
               )
 
               Telemetry.emit_failed(name, event.type, handler, path, reason)
+              DeadLetter.maybe_notify(config.dead_letter, event, {:handler_failed, handler, reason})
               [{:error, reason}]
           end
         rescue
@@ -110,6 +112,7 @@ defmodule Forja.Processor do
             )
 
             Telemetry.emit_failed(name, event.type, handler, path, exception)
+            DeadLetter.maybe_notify(config.dead_letter, event, {:handler_raised, handler, exception})
             [{:error, exception}]
         end
       end)

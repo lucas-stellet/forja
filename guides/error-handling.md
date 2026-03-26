@@ -157,18 +157,44 @@ defmodule MyApp.Events.PaymentHandler do
 end
 ```
 
-## Using DeadLetter for unrecoverable failures
+## Automatic DeadLetter notification on handler failure
 
-If a handler encounters a failure that cannot be retried and needs human attention, use `Forja.DeadLetter`:
+When any handler returns `{:error, reason}` or raises an exception, Forja automatically calls the configured `DeadLetter` callback with the failure details. The reason tuple includes the handler module so you can distinguish which handler failed:
+
+- `{:handler_failed, MyApp.OrderNotifier, :timeout}` — handler returned an error
+- `{:handler_raised, MyApp.OrderNotifier, %RuntimeError{}}` — handler raised an exception
+
+This happens **in addition to** the telemetry event and log. You don't need to do anything extra — just configure a `DeadLetter` module and it receives all handler failures automatically.
+
+## Using DeadLetter for alerting and recovery
+
+Configure a `DeadLetter` module to react to handler failures:
 
 ```elixir
 defmodule MyApp.DeadLetterHandler do
   @behaviour Forja.DeadLetter
 
+  require Logger
+
   @impl true
+  def handle_dead_letter(%Forja.Event{} = event, {:handler_failed, handler, reason}) do
+    Logger.error("Handler #{inspect(handler)} failed for #{event.type}: #{inspect(reason)}")
+    Sentry.capture_message("Handler failed",
+      extra: %{event_id: event.id, handler: inspect(handler), reason: inspect(reason)}
+    )
+    :ok
+  end
+
+  def handle_dead_letter(%Forja.Event{} = event, {:handler_raised, handler, exception}) do
+    Logger.error("Handler #{inspect(handler)} raised for #{event.type}: #{Exception.message(exception)}")
+    Sentry.capture_exception(exception,
+      extra: %{event_id: event.id, handler: inspect(handler)}
+    )
+    :ok
+  end
+
   def handle_dead_letter(%Forja.Event{} = event, reason) do
     Logger.error("Dead letter: #{event.type} (#{event.id}): #{inspect(reason)}")
-    Sentry.capture_message("Event dead-lettered", extra: %{event_id: event.id, type: event.type})
     :ok
   end
 end
