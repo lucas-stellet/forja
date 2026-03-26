@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-03-26
+
+### Added
+
+- `on_failure/3` optional callback on `Forja.Handler` for handler-level failure recovery
+- Error handling guide (`guides/error-handling.md`) with retry patterns, Sage integration, and examples
+- Clear separation: `on_failure/3` for handler failures, `DeadLetter` for event-level failures
+
 ## [0.2.1] - 2026-03-26
 
 ### Added
