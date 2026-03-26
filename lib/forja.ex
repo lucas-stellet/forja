@@ -104,6 +104,8 @@ defmodule Forja do
     * `:meta` - Map with metadata (default: `%{}`)
     * `:source` - String identifying the origin (default: `nil`)
     * `:idempotency_key` - Optional string key for deduplication (default: `nil`)
+    * `:correlation_id` - UUID grouping related events; auto-generated if not provided
+    * `:causation_id` - UUID of the event that caused this event (default: `nil`)
 
   ## Schema-based emission
 
@@ -134,13 +136,24 @@ defmodule Forja do
 
     case resolve_event_type(type, opts) do
       {:ok, resolved_type, payload, schema_version} ->
+        correlation_id =
+          Keyword.get(opts, :correlation_id) ||
+            Process.get(:forja_correlation_id) ||
+            Ecto.UUID.generate()
+
+        causation_id =
+          Keyword.get(opts, :causation_id) ||
+            Process.get(:forja_causation_event_id)
+
         attrs =
           %{
             type: resolved_type,
             payload: payload,
             meta: Keyword.get(opts, :meta, %{}),
             source: Keyword.get(opts, :source),
-            schema_version: schema_version
+            schema_version: schema_version,
+            correlation_id: correlation_id,
+            causation_id: causation_id
           }
           |> maybe_put_idempotency_key(idempotency_key)
 
@@ -226,7 +239,7 @@ defmodule Forja do
     case config.repo.transaction(multi) do
       {:ok, %{event: event}} ->
         after_emit(config, name, event)
-        Telemetry.emit_emitted(name, attrs.type, attrs.source, attrs.payload)
+        Telemetry.emit_emitted(name, attrs.type, attrs.source, attrs.payload, attrs.correlation_id)
         {:ok, event}
 
       {:error, :event, changeset, _changes} ->
@@ -285,6 +298,8 @@ defmodule Forja do
     * `:meta` - Map with metadata (default: `%{}`)
     * `:source` - String identifying the origin (default: `nil`)
     * `:idempotency_key` - Optional string key for deduplication (default: `nil`)
+    * `:correlation_id` - UUID grouping related events; auto-generated if not provided
+    * `:causation_id` - UUID of the event that caused this event (default: `nil`)
 
   ## Idempotency
 
@@ -330,13 +345,24 @@ defmodule Forja do
 
           case resolve_event_type(type, opts_for_resolve) do
             {:ok, resolved_type, validated_payload, schema_version} ->
+              correlation_id =
+                Keyword.get(opts, :correlation_id) ||
+                  Process.get(:forja_correlation_id) ||
+                  Ecto.UUID.generate()
+
+              causation_id =
+                Keyword.get(opts, :causation_id) ||
+                  Process.get(:forja_causation_event_id)
+
               attrs =
                 %{
                   type: resolved_type,
                   payload: validated_payload,
                   meta: meta,
                   source: source,
-                  schema_version: schema_version
+                  schema_version: schema_version,
+                  correlation_id: correlation_id,
+                  causation_id: causation_id
                 }
                 |> maybe_put_idempotency_key(idempotency_key)
 

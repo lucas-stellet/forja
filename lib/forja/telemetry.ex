@@ -45,7 +45,7 @@ defmodule Forja.Telemetry do
 
     * `[:forja, :event, :emitted]` - When an event is persisted and emitted
       * Measurements: `%{count: 1}`
-      * Metadata: `%{name: atom, type: string, source: string, payload: map | nil}`
+      * Metadata: `%{name: atom, type: string, source: string, payload: map | nil, correlation_id: string | nil}`
 
     * `[:forja, :event, :processed]` - When a handler processes successfully
       * Measurements: `%{duration: native_time}`
@@ -185,7 +185,8 @@ defmodule Forja.Telemetry do
         event: "event:emitted",
         name: to_string(meta.name),
         type: meta.type,
-        event_source: meta[:source]
+        event_source: meta[:source],
+        correlation_id: meta[:correlation_id]
       }
 
       if opts[:include_payload] && meta[:payload] do
@@ -315,9 +316,9 @@ defmodule Forja.Telemetry do
   @doc """
   Emits a telemetry event for event emission.
   """
-  @spec emit_emitted(atom(), String.t(), String.t() | nil, map() | nil) :: :ok
-  def emit_emitted(name, type, source, payload \\ nil) do
-    meta = %{name: name, type: type, source: source}
+  @spec emit_emitted(atom(), String.t(), String.t() | nil, map() | nil, String.t() | nil) :: :ok
+  def emit_emitted(name, type, source, payload \\ nil, correlation_id \\ nil) do
+    meta = %{name: name, type: type, source: source, correlation_id: correlation_id}
     meta = if payload, do: Map.put(meta, :payload, payload), else: meta
 
     :telemetry.execute([:forja, :event, :emitted], %{count: 1}, meta)

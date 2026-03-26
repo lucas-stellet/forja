@@ -58,7 +58,14 @@ defmodule Forja.Handler do
   ## Arguments
 
   - `event` - The `Forja.Event` struct being delivered
-  - `meta` - Map containing delivery metadata (e.g., `%{deliveries: 1}`)
+  - `meta` - Map containing delivery metadata:
+    - `:forja_name` - The Forja instance atom
+    - `:path` - Processing path (`:genstage`, `:oban`, `:reconciliation`, `:inline`)
+    - `:correlation_id` - UUID grouping all events in the same logical transaction
+    - `:causation_id` - UUID of the event that caused this one (nil for root events)
+
+    When you call `Forja.emit/3` inside a handler, `correlation_id` and `causation_id`
+    are propagated automatically — you do NOT need to pass them manually.
 
   ## Examples
 

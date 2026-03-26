@@ -77,12 +77,15 @@ defmodule Forja.Processor do
   defp dispatch_to_handlers(_config, name, event, path) do
     handlers = Registry.handlers_for(name, event.type)
 
+    Process.put(:forja_correlation_id, event.correlation_id)
+    Process.put(:forja_causation_event_id, event.id)
+
     errors =
       Enum.flat_map(handlers, fn handler ->
         start_time = System.monotonic_time()
 
         try do
-          meta = %{forja_name: name, path: path}
+          meta = %{forja_name: name, path: path, correlation_id: event.correlation_id, causation_id: event.id}
 
           case handler.handle_event(event, meta) do
             :ok ->
@@ -115,6 +118,9 @@ defmodule Forja.Processor do
       [] -> :ok
       [{:error, reason} | _] -> {:error, reason}
     end
+  after
+    Process.delete(:forja_correlation_id)
+    Process.delete(:forja_causation_event_id)
   end
 
   defp mark_processed(config, event) do

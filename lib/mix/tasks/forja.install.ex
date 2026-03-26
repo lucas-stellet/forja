@@ -115,6 +115,8 @@ if Code.ensure_loaded?(Igniter) do
               add :idempotency_key, :string
               add :reconciliation_attempts, :integer, default: 0, null: false
               add :schema_version, :integer, default: 1, null: false
+              add :correlation_id, :binary_id
+              add :causation_id, :binary_id
 
               timestamps(type: :utc_datetime_usec, updated_at: false)
             end
@@ -137,6 +139,16 @@ if Code.ensure_loaded?(Igniter) do
             create index(:forja_events, [:processed_at, :inserted_at, :reconciliation_attempts],
                      where: "processed_at IS NULL",
                      name: :forja_events_reconciliation
+                   )
+
+            create index(:forja_events, [:correlation_id],
+                     where: "correlation_id IS NOT NULL",
+                     name: :forja_events_correlation_id
+                   )
+
+            create index(:forja_events, [:causation_id],
+                     where: "causation_id IS NOT NULL",
+                     name: :forja_events_causation_id
                    )
           end
           """

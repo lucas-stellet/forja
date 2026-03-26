@@ -141,6 +141,42 @@ defmodule Forja.Testing do
     handler_module.handle_event(event, meta)
   end
 
+  @doc """
+  Asserts that an event of `child_type` was caused by the event `parent_id`.
+  """
+  @spec assert_event_caused_by(atom(), String.t(), String.t() | module()) :: Event.t()
+  def assert_event_caused_by(name, parent_id, child_type) do
+    child_type = resolve_type_string(child_type)
+    config = Config.get(name)
+
+    events =
+      config.repo.all(
+        from(e in Event,
+          where: e.type == ^child_type and e.causation_id == ^parent_id,
+          order_by: [asc: e.inserted_at]
+        )
+      )
+
+    assert events != [],
+           "Expected event of type #{inspect(child_type)} caused by #{inspect(parent_id)}, but none found."
+
+    List.first(events)
+  end
+
+  @doc """
+  Asserts that all given events share the same non-nil `correlation_id`.
+  """
+  @spec assert_same_correlation([Event.t()]) :: String.t()
+  def assert_same_correlation(events) when is_list(events) do
+    ids = events |> Enum.map(& &1.correlation_id) |> Enum.uniq()
+
+    assert length(ids) == 1 and hd(ids) != nil,
+           "Expected all events to share the same non-nil correlation_id, " <>
+             "but found: #{inspect(ids)}"
+
+    hd(ids)
+  end
+
   defp fetch_events(repo, type) do
     repo.all(from(e in Event, where: e.type == ^type, order_by: [asc: e.inserted_at]))
   end

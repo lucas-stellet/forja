@@ -194,3 +194,62 @@ Every event emitted through Forja is validated against its schema module, so han
 ```
 
 Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.2"}` to your deps.
+
+## 8. Correlation & Causation IDs
+
+Every event emitted through Forja carries two identifying fields:
+
+- **`correlation_id`** — A UUID that groups all events belonging to the same logical operation or transaction. When a handler emits a child event, the child inherits the parent's `correlation_id`, allowing you to trace an entire chain of events back to a single origin.
+
+- **`causation_id`** — The UUID of the event that directly caused this one. Root events (emitted directly by application code) have `nil` causation_id. When a handler emits a child event, the child's `causation_id` is set to the parent's event ID.
+
+### How propagation works
+
+When you call `Forja.emit/3` inside a handler, Forja automatically sets the `correlation_id` and `causation_id` on the child event:
+
+```elixir
+# Inside a handler for "order:created"
+def handle_event(%Forja.Event{} = event, _meta) do
+  # child inherits event.correlation_id and sets causation_id to event.id
+  {:ok, child} = Forja.emit(:my_app, MyApp.Events.OrderNotified, payload: %{...})
+  :ok
+end
+```
+
+The parent event's `correlation_id` becomes the child's `correlation_id`. The parent's `id` becomes the child's `causation_id`.
+
+**Handlers do not need to do anything special** — the propagation happens automatically based on the event currently being processed. Each new root event gets a fresh `correlation_id`.
+
+### Tracing chains in SQL
+
+To find all events in a single correlation chain:
+
+```sql
+SELECT id, type, correlation_id, causation_id, inserted_at
+FROM forja_events
+WHERE correlation_id = 'your-correlation-uuid-here'
+ORDER BY inserted_at;
+```
+
+To find all events directly caused by a specific event:
+
+```sql
+SELECT id, type, correlation_id, causation_id, inserted_at
+FROM forja_events
+WHERE causation_id = 'your-event-id-here';
+```
+
+To reconstruct the full parent→child tree for a correlation:
+
+```sql
+SELECT
+  child.id AS child_id,
+  child.type AS child_type,
+  parent.id AS parent_id,
+  parent.type AS parent_type,
+  child.inserted_at
+FROM forja_events child
+JOIN forja_events parent ON parent.id = child.causation_id
+WHERE child.correlation_id = 'your-correlation-uuid-here'
+ORDER BY child.inserted_at;
+```

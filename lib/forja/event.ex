@@ -16,6 +16,8 @@ defmodule Forja.Event do
   - `idempotency_key` - Unique key for idempotent event handling
   - `reconciliation_attempts` - Number of reconciliation attempts (default: 0)
   - `schema_version` - Integer identifying the event schema version (default: 1)
+  - `correlation_id` - UUID grouping all events in the same logical transaction
+  - `causation_id` - UUID of the event that directly caused this event
   - `inserted_at` - UTC datetime when the event was created (auto-managed)
 
   ## Examples
@@ -37,6 +39,8 @@ defmodule Forja.Event do
     field(:idempotency_key, :string)
     field(:reconciliation_attempts, :integer, default: 0)
     field(:schema_version, :integer, default: 1)
+    field(:correlation_id, :binary_id)
+    field(:causation_id, :binary_id)
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
@@ -51,6 +55,8 @@ defmodule Forja.Event do
           idempotency_key: String.t() | nil,
           reconciliation_attempts: integer(),
           schema_version: pos_integer(),
+          correlation_id: binary() | nil,
+          causation_id: binary() | nil,
           inserted_at: DateTime.t()
         }
 
@@ -77,7 +83,9 @@ defmodule Forja.Event do
       :meta,
       :source,
       :idempotency_key,
-      :schema_version
+      :schema_version,
+      :correlation_id,
+      :causation_id
     ])
     |> Ecto.Changeset.validate_required([:type])
     |> Ecto.Changeset.validate_length(:type, min: 1, max: 255)
