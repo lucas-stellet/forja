@@ -164,6 +164,13 @@ defmodule Forja do
     end
   end
 
+  defp resolve_event_type(type, _opts) when is_binary(type) do
+    raise ArgumentError,
+          "Forja.emit/3 requires a Forja.Event.Schema module as the type argument, " <>
+            "got string #{inspect(type)}. Define an event schema module with " <>
+            "`use Forja.Event.Schema` and pass the module instead."
+  end
+
   defp resolve_event_type(schema_module, opts) when is_atom(schema_module) do
     Code.ensure_loaded(schema_module)
 
@@ -293,8 +300,8 @@ defmodule Forja do
 
       Ecto.Multi.new()
       |> Ecto.Multi.insert(:order, order_changeset)
-      |> Forja.emit_multi(:billing, "order:created",
-        payload_fn: fn %{order: order} -> %{"order_id" => order.id} end,
+      |> Forja.emit_multi(:billing, MyApp.Events.OrderCreated,
+        payload_fn: fn %{order: order} -> %{order_id: order.id, amount_cents: order.total} end,
         source: "orders",
         idempotency_key: "order-created-\#{order_ref}"
       )

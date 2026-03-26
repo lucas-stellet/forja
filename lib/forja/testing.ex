@@ -26,10 +26,10 @@ defmodule Forja.Testing do
         import Forja.Testing
 
         test "emitting order event" do
-          Forja.emit(:test, "order:created", payload: %{"id" => 1})
+          Forja.emit(:test, MyApp.Events.OrderCreated, payload: %{id: 1})
 
-          assert_event_emitted(:test, "order:created")
-          assert_event_emitted(:test, "order:created", %{"id" => 1})
+          assert_event_emitted(:test, MyApp.Events.OrderCreated)
+          assert_event_emitted(:test, MyApp.Events.OrderCreated, %{"id" => 1})
         end
       end
   """
