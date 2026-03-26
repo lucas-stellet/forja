@@ -2,7 +2,7 @@ defmodule Forja.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/forgeworksio/forja"
+  @source_url "https://github.com/lucas-stellet/forja"
 
   def project do
     [
@@ -59,9 +59,69 @@ defmodule Forja.MixProject do
 
   defp docs do
     [
-      main: "Forja",
+      main: "readme",
       source_ref: "v#{@version}",
-      source_url: @source_url
+      source_url: @source_url,
+      homepage_url: @source_url,
+      extras: extras(),
+      groups_for_modules: groups_for_modules(),
+      groups_for_extras: groups_for_extras(),
+      formatters: ["html"],
+      skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
+    ]
+  end
+
+  defp extras do
+    [
+      "README.md",
+      "guides/getting-started.md",
+      "guides/architecture.md",
+      "guides/telemetry.md",
+      "guides/testing.md",
+      "CHANGELOG.md": [title: "Changelog"]
+    ]
+  end
+
+  defp groups_for_extras do
+    [
+      Introduction: ~r/README\.md/,
+      Guides: ~r/guides\/.+\.md/
+    ]
+  end
+
+  defp groups_for_modules do
+    [
+      Core: [
+        Forja,
+        Forja.Event,
+        Forja.Config
+      ],
+      "Handlers & Behaviours": [
+        Forja.Handler,
+        Forja.DeadLetter
+      ],
+      Infrastructure: [
+        Forja.Processor,
+        Forja.Registry,
+        Forja.AdvisoryLock,
+        Forja.ObanListener,
+        Forja.Telemetry
+      ],
+      "GenStage Pipeline": [
+        Forja.EventProducer,
+        Forja.EventConsumer,
+        Forja.EventWorker
+      ],
+      Workers: [
+        Forja.Workers.ProcessEventWorker,
+        Forja.Workers.ReconciliationWorker
+      ],
+      Testing: [
+        Forja.Testing
+      ],
+      "Mix Tasks": [
+        Mix.Tasks.Forja.Install
+      ]
     ]
   end
 
