@@ -49,7 +49,7 @@ Supervision tree:
    - `INSERT` into `forja_events` table
    - `INSERT` Oban `ProcessEventWorker` job (queue read from schema, prefixed with `forja_`)
 3. `COMMIT`
-4. PubSub broadcast `{:forja_event_emitted, %Forja.Event{}}`
+4. PubSub broadcast `{:forja_event_emitted, %Forja.Event{}}` — **protected by try/rescue**; broadcast failure is logged as warning but does not fail `emit/3` (the event is already persisted and the Oban job exists)
 5. Telemetry `[:forja, :event, :emitted]`
 
 No change to the public API signature.
@@ -90,8 +90,8 @@ For users who need manual control, `Forja.broadcast_event(name, event_id)` is av
      - Call `handler.handle_event(event, meta)`
      - On error or exception: call `handler.on_failure/3` if implemented
      - Emit telemetry per handler
-   - Mark `processed_at = DateTime.utc_now()`
-   - PubSub broadcast `{:forja_event_processed, %Forja.Event{}}`
+   - Mark `processed_at = DateTime.utc_now()` — uses `repo.update/1` (non-bang); on failure returns `{:error, reason}` to Oban for retry. Since handlers already ran, handlers must tolerate re-execution (idempotency requirement).
+   - PubSub broadcast `{:forja_event_processed, %Forja.Event{}}` — **protected by try/rescue**; broadcast failure is logged but does not affect the processing result
 3. Return `:ok`
 
 ### Event chaining
@@ -135,6 +135,10 @@ The Processor drops all dual-path concerns:
 - Telemetry emission
 - Correlation/causation ID propagation via Process dictionary
 
+**Changed:**
+- `dispatch_to_handlers/4` now always returns `:ok`. Handler errors are handled internally (telemetry + `on_failure/3`) rather than returning `{:error, reason}` that was previously discarded by the caller. This eliminates the non-assertive pattern where a return value was silently ignored.
+- `mark_processed/2` uses `repo.update/1` (non-bang) instead of `repo.update!/1`. On failure, the error propagates to the Oban worker for retry. Since handlers already executed, this means handlers may run again on retry — reinforcing the idempotency requirement.
+
 **Return type changes:**
 
 ```elixir
@@ -177,6 +181,18 @@ end
 ```
 
 PubSub remains a required dependency. Broadcasts are best-effort — a crashed subscriber loses the notification, but no event data is lost (it's in the database).
+
+**Broadcast resilience:** All PubSub broadcasts (in `emit/3`, `transaction/2`, and the Processor post-processing) are wrapped in `try/rescue`. A broadcast failure logs a warning but never fails the calling function. The event is already persisted and the Oban job guarantees processing regardless of PubSub availability. Pattern:
+
+```elixir
+defp safe_broadcast(config, topic, message) do
+  Phoenix.PubSub.broadcast(config.pubsub, topic, message)
+rescue
+  error ->
+    Logger.warning("Forja: PubSub broadcast failed: #{inspect(error)}", domain: [:forja])
+    :ok
+end
+```
 
 ## Queue Routing
 
@@ -291,6 +307,26 @@ The Oban unique constraint (`[keys: [:event_id], period: 900]`) prevents duplica
 **Removed events:**
 - `[:forja, :event, :skipped]` — was emitted when advisory lock was held by another path. No longer applicable.
 - `[:forja, :producer, :buffer_size]` — was emitted by `EventProducer` (GenStage). No longer applicable.
+
+**Removed functions:**
+- `Forja.Telemetry.emit_skipped/3` — dead code after advisory lock removal.
+- `Forja.Telemetry.emit_buffer_size/2` — dead code after GenStage removal.
+
+**Refactored emission functions:** Telemetry emission functions with 5+ positional parameters are refactored to accept a map as second argument, eliminating the risk of swapped arguments:
+
+```elixir
+# Before (long parameter list — easy to swap args)
+Telemetry.emit_processed(name, type, handler, path, duration)
+Telemetry.emit_failed(name, type, handler, path, reason)
+Telemetry.emit_emitted(name, type, source, payload, correlation_id)
+
+# After (map — self-documenting, order-independent)
+Telemetry.emit_processed(name, %{type: type, handler: handler, path: path, duration: duration})
+Telemetry.emit_failed(name, %{type: type, handler: handler, path: path, reason: reason})
+Telemetry.emit_emitted(name, %{type: type, source: source, payload: payload, correlation_id: cid})
+```
+
+Functions with 3 or fewer parameters (`emit_dead_letter/3`, `emit_abandoned/3`, `emit_reconciled/2`, `emit_deduplicated/3`, `emit_validation_failed/3`) remain unchanged.
 
 **Modified metadata:**
 - `[:forja, :event, :processed]` — the `:path` metadata no longer includes `:genstage` as a value
