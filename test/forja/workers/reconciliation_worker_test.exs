@@ -6,6 +6,8 @@ defmodule Forja.Workers.ReconciliationWorkerTest do
   alias Forja.Registry
   alias Forja.Workers.ReconciliationWorker
 
+  @pubsub Forja.Workers.ReconciliationWorkerTest.PubSub
+
   defmodule ReconciliationTestHandler do
     @moduledoc "Test handler for reconciliation."
 
@@ -49,12 +51,24 @@ defmodule Forja.Workers.ReconciliationWorkerTest do
 
   setup do
     Process.register(self(), :reconciliation_test)
+    start_supervised!({Phoenix.PubSub, name: @pubsub})
+
+    Repo.query!("""
+    CREATE TABLE IF NOT EXISTS oban_jobs (
+      id bigserial PRIMARY KEY,
+      worker text,
+      args jsonb,
+      state text
+    )
+    """)
+
+    Repo.query!("TRUNCATE oban_jobs")
 
     config =
       Config.new(
         name: :reconciliation_test,
         repo: Repo,
-        pubsub: Forja.TestPubSub,
+        pubsub: @pubsub,
         handlers: [ReconciliationTestHandler, FailingHandler],
         dead_letter: TestDeadLetterHandler,
         reconciliation: [
@@ -92,7 +106,7 @@ defmodule Forja.Workers.ReconciliationWorkerTest do
         Config.new(
           name: :reconciliation_threshold_test,
           repo: Repo,
-          pubsub: Forja.TestPubSub,
+          pubsub: @pubsub,
           handlers: [ReconciliationTestHandler],
           reconciliation: [
             enabled: true,
@@ -127,12 +141,53 @@ defmodule Forja.Workers.ReconciliationWorkerTest do
       assert reloaded.reconciliation_attempts == 0
     end
 
+    test "skips events that have an active Oban job" do
+      event = insert_stale_event!("reconciliation_test:event")
+      event_id = event.id
+
+      Repo.query!(
+        """
+        INSERT INTO oban_jobs (worker, args, state)
+        VALUES ($1, $2, $3)
+        """,
+        [
+          "Forja.Workers.ProcessEventWorker",
+          %{"event_id" => event.id, "forja_name" => "reconciliation_test"},
+          "available"
+        ]
+      )
+
+      assert %{rows: [[1]]} =
+               Repo.query!(
+                 """
+                 SELECT 1
+                 FROM oban_jobs
+                 WHERE worker = $1
+                   AND args->>'event_id' = $2
+                   AND state IN ('available', 'executing', 'scheduled', 'retryable')
+                 LIMIT 1
+                 """,
+                 ["Forja.Workers.ProcessEventWorker", event_id]
+               )
+
+      refute_receive {:handled, ^event_id}, 0
+
+      job = %Oban.Job{args: %{"forja_name" => "reconciliation_test"}}
+      assert :ok = ReconciliationWorker.perform(job)
+
+      refute_receive {:handled, ^event_id}
+
+      reloaded = Repo.get!(Event, event.id)
+      assert is_nil(reloaded.processed_at)
+      assert reloaded.reconciliation_attempts == 0
+    end
+
     test "returns disabled when reconciliation is disabled" do
       config =
         Config.new(
           name: :reconciliation_disabled_test,
           repo: Repo,
-          pubsub: Forja.TestPubSub,
+          pubsub: @pubsub,
           handlers: [],
           reconciliation: [enabled: false]
         )

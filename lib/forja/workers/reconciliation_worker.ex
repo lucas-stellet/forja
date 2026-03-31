@@ -95,23 +95,41 @@ defmodule Forja.Workers.ReconciliationWorker do
   end
 
   defp reconcile_event(config, forja_name, event, max_retries) do
-    case Forja.Processor.process(forja_name, event.id, :reconciliation) do
-      :ok ->
-        Telemetry.emit_reconciled(forja_name, event.id)
+    if has_active_oban_job?(config.repo, event.id) do
+      :ok
+    else
+      case Forja.Processor.process(forja_name, event.id, :reconciliation) do
+        :ok ->
+          Telemetry.emit_reconciled(forja_name, event.id)
 
-      {:skipped, :locked} ->
-        :ok
+        {:error, _reason} ->
+          updated_event =
+            event
+            |> Event.increment_reconciliation_changeset()
+            |> config.repo.update!()
 
-      {:error, _reason} ->
-        updated_event =
-          event
-          |> Event.increment_reconciliation_changeset()
-          |> config.repo.update!()
-
-        if updated_event.reconciliation_attempts >= max_retries do
-          Telemetry.emit_abandoned(forja_name, event.id, updated_event.reconciliation_attempts)
-          DeadLetter.maybe_notify(config.dead_letter, updated_event, :reconciliation_exhausted)
-        end
+          if updated_event.reconciliation_attempts >= max_retries do
+            Telemetry.emit_abandoned(forja_name, event.id, updated_event.reconciliation_attempts)
+            DeadLetter.maybe_notify(config.dead_letter, updated_event, :reconciliation_exhausted)
+          end
+      end
     end
+  end
+
+  defp has_active_oban_job?(repo, event_id) do
+    result =
+      repo.query!(
+        """
+        SELECT 1
+        FROM oban_jobs
+        WHERE worker = $1
+          AND args->>'event_id' = $2
+          AND state IN ('available', 'executing', 'scheduled', 'retryable')
+        LIMIT 1
+        """,
+        ["Forja.Workers.ProcessEventWorker", event_id]
+      )
+
+    result.num_rows > 0
   end
 end

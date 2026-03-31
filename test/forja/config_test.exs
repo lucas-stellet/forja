@@ -33,7 +33,7 @@ defmodule Forja.ConfigTest do
       config = Config.new(name: :test_app, repo: Repo, pubsub: PubSub)
 
       assert config.oban_name == Oban
-      assert config.consumer_pool_size == 4
+      assert config.default_queue == :events
       assert config.event_topic_prefix == "forja"
       assert config.handlers == []
       assert config.dead_letter == nil
@@ -50,7 +50,7 @@ defmodule Forja.ConfigTest do
           repo: Repo,
           pubsub: PubSub,
           oban_name: Oban,
-          consumer_pool_size: 8,
+          default_queue: :custom,
           event_topic_prefix: "billing",
           handlers: [FakeHandler],
           dead_letter: FakeDeadLetter,
@@ -63,12 +63,22 @@ defmodule Forja.ConfigTest do
         )
 
       assert config.oban_name == Oban
-      assert config.consumer_pool_size == 8
+      assert config.default_queue == :custom
       assert config.event_topic_prefix == "billing"
       assert config.handlers == [FakeHandler]
       assert config.dead_letter == FakeDeadLetter
       assert config.reconciliation[:enabled] == false
       assert config.reconciliation[:max_retries] == 5
+    end
+
+    test "default_queue defaults to :events" do
+      config = Config.new(name: :test, repo: Repo, pubsub: PubSub)
+      assert config.default_queue == :events
+    end
+
+    test "default_queue can be overridden" do
+      config = Config.new(name: :test, repo: Repo, pubsub: PubSub, default_queue: :custom)
+      assert config.default_queue == :custom
     end
 
     test "raises on missing required field :name" do

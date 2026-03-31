@@ -8,7 +8,7 @@ defmodule Forja.Testing do
   ## Inline mode
 
   In tests, Forja can be configured to process events synchronously
-  without GenStage or Oban:
+  without Oban:
 
       start_supervised!(
         {Forja,

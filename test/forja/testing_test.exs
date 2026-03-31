@@ -5,6 +5,8 @@ defmodule Forja.TestingTest do
   alias Forja.Event
   alias Forja.Registry
 
+  @pubsub Forja.TestingTest.PubSub
+
   defmodule TestingHandler do
     @moduledoc "Test handler for Forja.Testing."
 
@@ -18,11 +20,13 @@ defmodule Forja.TestingTest do
   end
 
   setup do
+    start_supervised!({Phoenix.PubSub, name: @pubsub})
+
     config =
       Config.new(
         name: :testing_test,
         repo: Repo,
-        pubsub: Forja.TestPubSub,
+        pubsub: @pubsub,
         handlers: [TestingHandler]
       )
 

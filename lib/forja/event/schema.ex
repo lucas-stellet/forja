@@ -30,6 +30,7 @@ defmodule Forja.Event.Schema do
   - `__forja_event_schema__/0` - Returns `true`, marker for runtime detection
   - `event_type/0` - Returns the configured event type string
   - `schema_version/0` - Returns the schema version (default: 1)
+  - `queue/0` - Returns the configured queue name or `nil`
   - `parse_payload/1` - Validates input against the Zoi schema
   - `upcast/2` - Upcasts an old payload version to the current version
 
@@ -47,6 +48,7 @@ defmodule Forja.Event.Schema do
       @forja_event_type nil
       @forja_schema_version 1
       @forja_payload_used false
+      @forja_queue nil
 
       import Forja.Event.Schema
 
@@ -79,6 +81,22 @@ defmodule Forja.Event.Schema do
   defmacro schema_version(version) when is_integer(version) and version > 0 do
     quote do
       @forja_schema_version unquote(version)
+    end
+  end
+
+  @doc """
+  Sets the Oban queue for this event type.
+
+  Forja prefixes the name with `forja_` internally. For example,
+  `queue :payments` routes to the `:forja_payments` Oban queue.
+
+  ## Example
+
+      queue :payments
+  """
+  defmacro queue(name) when is_atom(name) do
+    quote do
+      @forja_queue unquote(name)
     end
   end
 
@@ -136,6 +154,7 @@ defmodule Forja.Event.Schema do
     fields = Module.get_attribute(env.module, :forja_fields) |> Enum.reverse()
     event_type = Module.get_attribute(env.module, :forja_event_type)
     version = Module.get_attribute(env.module, :forja_schema_version)
+    queue_value = Module.get_attribute(env.module, :forja_queue)
 
     unless event_type do
       raise CompileError,
@@ -180,6 +199,11 @@ defmodule Forja.Event.Schema do
       Returns the schema version for this event schema.
       """
       def schema_version, do: unquote(version)
+
+      @doc """
+      Returns the configured queue name for this event schema.
+      """
+      def queue, do: unquote(queue_value)
 
       @doc """
       Parses and validates the given payload against this event's Zoi schema.

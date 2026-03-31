@@ -51,12 +51,13 @@ defmodule Forja.ProcessorTest do
 
   setup do
     Process.register(self(), :processor_test)
+    start_supervised!({Phoenix.PubSub, name: Forja.ProcessorTestPubSub})
 
     config =
       Config.new(
         name: :processor_test,
         repo: Repo,
-        pubsub: Phoenix.PubSub.Subscriber,
+        pubsub: Forja.ProcessorTestPubSub,
         handlers: [SuccessHandler, ErrorHandler, RaisingHandler]
       )
 
@@ -72,7 +73,7 @@ defmodule Forja.ProcessorTest do
     test "processes event and marks as processed" do
       event = insert_event!("test:success")
 
-      assert :ok = Processor.process(:processor_test, event.id, :genstage)
+      assert :ok = Processor.process(:processor_test, event.id, :oban)
       assert_receive {:handled, event_id}
       assert event_id == event.id
 
@@ -83,12 +84,12 @@ defmodule Forja.ProcessorTest do
     test "skips already processed events" do
       event = insert_event!("test:success", processed_at: DateTime.utc_now())
 
-      assert :ok = Processor.process(:processor_test, event.id, :genstage)
+      assert :ok = Processor.process(:processor_test, event.id, :oban)
       refute_receive {:handled, _}
     end
 
     test "returns ok for non-existent events" do
-      assert :ok = Processor.process(:processor_test, Ecto.UUID.generate(), :genstage)
+      assert :ok = Processor.process(:processor_test, Ecto.UUID.generate(), :oban)
     end
 
     test "marks event as processed even when handler returns error" do
@@ -107,6 +108,16 @@ defmodule Forja.ProcessorTest do
 
       reloaded = Repo.get!(Event, event.id)
       assert reloaded.processed_at != nil
+    end
+
+    test "broadcasts :forja_event_processed after processing" do
+      Phoenix.PubSub.subscribe(Forja.ProcessorTestPubSub, "forja:events")
+      event = insert_event!("test:success")
+
+      assert :ok = Processor.process(:processor_test, event.id, :oban)
+
+      assert_receive {:forja_event_processed, %Event{id: id}}
+      assert id == event.id
     end
   end
 

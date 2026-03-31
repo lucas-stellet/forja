@@ -50,7 +50,7 @@ defmodule Forja.Telemetry do
     * `emit_processed(name, %{type: type, handler: handler, path: path, duration: duration})`
       emits `[:forja, :event, :processed]` when a handler processes successfully
       * Measurements: `%{duration: native_time}`
-      * Metadata: `%{name: atom, type: string, handler: module, path: :genstage | :oban}`
+      * Metadata: `%{name: atom, type: string, handler: module, path: atom()}`
 
     * `emit_failed(name, %{type: type, handler: handler, path: path, reason: reason})`
       emits `[:forja, :event, :failed]` when a handler fails

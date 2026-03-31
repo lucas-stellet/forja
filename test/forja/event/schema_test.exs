@@ -37,6 +37,28 @@ defmodule Forja.Event.SchemaTest do
     event_type("test:minimal")
   end
 
+  defmodule QueuedEvent do
+    use Forja.Event.Schema
+
+    event_type("test:queued")
+    schema_version(1)
+    queue(:payments)
+
+    payload do
+      field(:id, Zoi.string())
+    end
+  end
+
+  defmodule DefaultQueueEvent do
+    use Forja.Event.Schema
+
+    event_type("test:default_queue")
+
+    payload do
+      field(:id, Zoi.string())
+    end
+  end
+
   describe "__forja_event_schema__/0" do
     test "returns true" do
       assert ValidEvent.__forja_event_schema__() == true
@@ -57,6 +79,16 @@ defmodule Forja.Event.SchemaTest do
 
     test "returns override value when configured" do
       assert VersionedEvent.schema_version() == 2
+    end
+  end
+
+  describe "queue/0" do
+    test "returns configured queue name" do
+      assert QueuedEvent.queue() == :payments
+    end
+
+    test "returns nil when not configured" do
+      assert DefaultQueueEvent.queue() == nil
     end
   end
 

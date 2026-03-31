@@ -49,12 +49,12 @@ defmodule Forja.TelemetryTest do
     Telemetry.emit_processed(:test, %{
       type: "order:created",
       handler: FakeHandler,
-      path: :genstage,
+      path: :oban,
       duration: 1_000
     })
 
     assert_receive {:telemetry, [:forja, :event, :processed], %{duration: 1_000},
-                    %{name: :test, type: "order:created", handler: FakeHandler, path: :genstage}}
+                    %{name: :test, type: "order:created", handler: FakeHandler, path: :oban}}
   end
 
   test "emit_failed/2 sends telemetry event with reason" do

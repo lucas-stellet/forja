@@ -6,6 +6,8 @@ defmodule Forja.ObanListenerTest do
   alias Forja.ObanListener
   alias Forja.Registry
 
+  @pubsub Forja.ObanListenerTest.PubSub
+
   defmodule TestDeadLetterHandler do
     @moduledoc "Test dead letter handler for ObanListener."
 
@@ -20,18 +22,13 @@ defmodule Forja.ObanListenerTest do
 
   setup do
     Process.register(self(), :oban_listener_test)
-
-    # Stub module for PubSub - only needed for Config creation
-    defmodule TestPubSub do
-      def start_link(_opts), do: {:ok, self()}
-      def broadcast(_server, _topic, _message), do: :ok
-    end
+    start_supervised!({Phoenix.PubSub, name: @pubsub})
 
     config =
       Config.new(
         name: :oban_listener_test,
         repo: Repo,
-        pubsub: TestPubSub,
+        pubsub: @pubsub,
         handlers: [],
         dead_letter: TestDeadLetterHandler
       )

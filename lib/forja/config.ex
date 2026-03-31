@@ -11,7 +11,7 @@ defmodule Forja.Config do
     * `:repo` - Ecto.Repo module (required)
     * `:pubsub` - Phoenix.PubSub module (required)
     * `:oban_name` - Oban instance name (default: `Oban`)
-    * `:consumer_pool_size` - Maximum number of concurrently processed events (default: `4`)
+    * `:default_queue` - Default Oban queue used for event jobs (default: `:events`)
     * `:event_topic_prefix` - Prefix for PubSub topics (default: `"forja"`)
     * `:handlers` - List of modules implementing `Forja.Handler` (default: `[]`)
     * `:dead_letter` - Module implementing `Forja.DeadLetter` (default: `nil`, optional)
@@ -33,7 +33,7 @@ defmodule Forja.Config do
     :repo,
     :pubsub,
     oban_name: Oban,
-    consumer_pool_size: 4,
+    default_queue: :events,
     event_topic_prefix: "forja",
     handlers: [],
     dead_letter: nil,
@@ -50,7 +50,7 @@ defmodule Forja.Config do
           repo: module(),
           pubsub: module(),
           oban_name: atom(),
-          consumer_pool_size: pos_integer(),
+          default_queue: atom(),
           event_topic_prefix: String.t(),
           handlers: [module()],
           dead_letter: module() | nil,

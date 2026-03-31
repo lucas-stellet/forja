@@ -6,6 +6,8 @@ defmodule Forja.Workers.ProcessEventWorkerTest do
   alias Forja.Registry
   alias Forja.Workers.ProcessEventWorker
 
+  @pubsub Forja.Workers.ProcessEventWorkerTest.PubSub
+
   defmodule WorkerTestHandler do
     @moduledoc "Test handler for the Oban worker."
 
@@ -23,18 +25,13 @@ defmodule Forja.Workers.ProcessEventWorkerTest do
 
   setup do
     Process.register(self(), :worker_test)
-
-    # Stub module for PubSub - only needed for Config creation
-    defmodule TestPubSub do
-      def start_link(_opts), do: {:ok, self()}
-      def broadcast(_server, _topic, _message), do: :ok
-    end
+    start_supervised!({Phoenix.PubSub, name: @pubsub})
 
     config =
       Config.new(
         name: :worker_test,
         repo: Repo,
-        pubsub: TestPubSub,
+        pubsub: @pubsub,
         handlers: [WorkerTestHandler]
       )
 

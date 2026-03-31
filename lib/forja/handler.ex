@@ -2,7 +2,7 @@ defmodule Forja.Handler do
   @moduledoc """
   Behaviour module for event handlers in Forja.
 
-  Implement this behaviour to process events from the dual-path pipeline.
+  Implement this behaviour to process events from the Oban processing pipeline.
   Each handler specifies which event types it subscribes to via `event_types/0`.
 
   ## Callbacks
@@ -62,7 +62,7 @@ defmodule Forja.Handler do
   - `event` - The `Forja.Event` struct being delivered
   - `meta` - Map containing delivery metadata:
     - `:forja_name` - The Forja instance atom
-    - `:path` - Processing path (`:genstage`, `:oban`, `:reconciliation`, `:inline`)
+    - `:path` - Processing path (`:oban`, `:reconciliation`, `:inline`)
     - `:correlation_id` - UUID grouping all events in the same logical transaction
     - `:causation_id` - UUID of the event that caused this one (nil for root events)
 

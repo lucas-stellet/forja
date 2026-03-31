@@ -1,10 +1,13 @@
 defmodule Forja do
   @moduledoc """
-  Event Bus with dual-path processing for Elixir.
+  Event bus with Oban-backed processing for Elixir.
 
-  Forja combines PubSub/GenStage latency with Oban delivery guarantees.
-  Events are processed by the fastest path, with three-layer deduplication
-  (advisory lock + `processed_at` + Oban unique).
+  Forja persists events in the database, enqueues Oban jobs for processing,
+  and broadcasts committed events through PubSub for subscribers that want
+  emission notifications.
+
+  Event processing relies on an Oban unique constraint plus the `processed_at`
+  safety net to prevent duplicate handling.
 
   ## Usage
 
@@ -45,17 +48,16 @@ defmodule Forja do
         payload_fn: fn %{order: order} -> %{order_id: order.id, amount_cents: order.total} end,
         source: "orders"
       )
-      |> Repo.transaction()
+      |> Forja.transaction(:my_app)
   """
 
   use Supervisor
 
   import Ecto.Query
+  require Logger
 
   alias Forja.Config
   alias Forja.Event
-  alias Forja.EventConsumer
-  alias Forja.EventProducer
   alias Forja.ObanListener
   alias Forja.Registry
   alias Forja.Telemetry
@@ -70,7 +72,7 @@ defmodule Forja do
     * `:repo` - Ecto.Repo module (required)
     * `:pubsub` - Phoenix.PubSub module (required)
     * `:oban_name` - Oban instance name (default: `Oban`)
-    * `:consumer_pool_size` - Maximum processing concurrency (default: `4`)
+    * `:default_queue` - Default Oban queue for event jobs (default: `:events`)
     * `:event_topic_prefix` - Prefix for PubSub topics (default: `"forja"`)
     * `:handlers` - List of `Forja.Handler` modules (default: `[]`)
     * `:dead_letter` - Module implementing `Forja.DeadLetter` (default: `nil`)
@@ -96,7 +98,6 @@ defmodule Forja do
 
   After the commit:
   3. Broadcasts via PubSub
-  4. Notifies the EventProducer
 
   ## Options
 
@@ -135,7 +136,7 @@ defmodule Forja do
     idempotency_key = Keyword.get(opts, :idempotency_key)
 
     case resolve_event_type(type, opts) do
-      {:ok, resolved_type, payload, schema_version} ->
+      {:ok, resolved_type, payload, schema_version, schema_module} ->
         correlation_id =
           Keyword.get(opts, :correlation_id) ||
             Process.get(:forja_correlation_id) ||
@@ -159,7 +160,7 @@ defmodule Forja do
 
         case check_idempotency(config, idempotency_key) do
           :proceed ->
-            do_emit(config, name, attrs)
+            do_emit(config, name, attrs, schema_module)
 
           {:already_processed, event} ->
             Telemetry.emit_deduplicated(name, idempotency_key, event.id)
@@ -198,7 +199,7 @@ defmodule Forja do
     case schema_module.parse_payload(raw_payload) do
       {:ok, validated} ->
         string_keyed = stringify_keys(validated)
-        {:ok, schema_module.event_type(), string_keyed, schema_module.schema_version()}
+        {:ok, schema_module.event_type(), string_keyed, schema_module.schema_version(), schema_module}
 
       {:error, errors} ->
         {:error, Forja.ValidationError.new(schema_module, errors)}
@@ -224,7 +225,9 @@ defmodule Forja do
     end
   end
 
-  defp do_emit(config, name, attrs) do
+  defp do_emit(config, name, attrs, schema_module) do
+    queue = resolve_queue(config, schema_module)
+
     multi =
       Ecto.Multi.new()
       |> Ecto.Multi.insert(:event, fn _changes ->
@@ -232,14 +235,19 @@ defmodule Forja do
       end)
       |> Ecto.Multi.run(:oban_job, fn _repo, %{event: event} ->
         job_args = %{event_id: event.id, forja_name: Atom.to_string(name)}
-        changeset = ProcessEventWorker.new(job_args)
+        changeset = ProcessEventWorker.new(job_args, queue: :"forja_#{queue}")
         Oban.insert(config.oban_name, changeset)
       end)
 
     case config.repo.transaction(multi) do
       {:ok, %{event: event}} ->
         after_emit(config, name, event)
-        Telemetry.emit_emitted(name, attrs.type, attrs.source, attrs.payload, attrs.correlation_id)
+        Telemetry.emit_emitted(name, %{
+          type: attrs.type,
+          source: attrs.source,
+          payload: attrs.payload,
+          correlation_id: attrs.correlation_id
+        })
         {:ok, event}
 
       {:error, :event, changeset, _changes} ->
@@ -252,7 +260,7 @@ defmodule Forja do
 
   defp reenqueue_event(config, name, event) do
     job_args = %{event_id: event.id, forja_name: Atom.to_string(name)}
-    changeset = ProcessEventWorker.new(job_args)
+    changeset = ProcessEventWorker.new(job_args, queue: :"forja_#{config.default_queue}")
     Oban.insert(config.oban_name, changeset)
   end
 
@@ -264,30 +272,17 @@ defmodule Forja do
   If validation fails, the transaction is rolled back with
   `{:error, step_key, %Forja.ValidationError{}, changes}`.
 
-  The caller is responsible for executing `Repo.transaction/1` on the returned Multi.
+  The caller is responsible for executing the transaction on the returned Multi.
+  Use `Forja.transaction/2` when you want emitted events in the Multi to be
+  broadcast after a successful commit:
 
-  ## GenStage fast-path and emit_multi
-
-  Unlike `emit/3`, `emit_multi` does NOT trigger PubSub broadcast automatically.
-  Doing so inside an `Ecto.Multi.run` step would fire those side-effects while the
-  caller's transaction is still open -- creating a race condition where the GenStage
-  consumer attempts to process the event before the commit completes.
-
-  With `emit_multi`, the **Oban path is the sole delivery mechanism**. If the
-  GenStage fast-path is also desired, the caller must invoke
-  `Forja.notify_producers/2` after `Repo.transaction/1` returns successfully:
-
-      case Repo.transaction(multi) do
-        {:ok, %{order: order}} ->
-          Forja.notify_producers(:my_app, event_id)
-          {:ok, order}
-        {:error, _, changeset, _} ->
-          {:error, changeset}
-      end
-
-  This is intentional: the dual-path design guarantees delivery via Oban
-  regardless, so missing the GenStage fast-path on the `emit_multi` path is
-  safe by design.
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(:order, order_changeset)
+      |> Forja.emit_multi(:my_app, MyApp.Events.OrderCreated,
+        payload_fn: fn %{order: order} -> %{order_id: order.id, amount_cents: order.total} end,
+        source: "orders"
+      )
+      |> Forja.transaction(:my_app)
 
   ## Options
 
@@ -344,7 +339,7 @@ defmodule Forja do
           opts_for_resolve = [payload: raw_payload]
 
           case resolve_event_type(type, opts_for_resolve) do
-            {:ok, resolved_type, validated_payload, schema_version} ->
+            {:ok, resolved_type, validated_payload, schema_version, _schema_module} ->
               correlation_id =
                 Keyword.get(opts, :correlation_id) ||
                   Process.get(:forja_correlation_id) ||
@@ -395,30 +390,56 @@ defmodule Forja do
           {:error, :validation_failed}
 
         %Event{} = event ->
-          job_args = %{event_id: event.id, forja_name: Atom.to_string(name)}
           config = Config.get(name)
-          changeset = ProcessEventWorker.new(job_args)
+          queue = resolve_queue(config, type)
+          job_args = %{event_id: event.id, forja_name: Atom.to_string(name)}
+          changeset = ProcessEventWorker.new(job_args, queue: :"forja_#{queue}")
           Oban.insert(config.oban_name, changeset)
       end
     end)
   end
 
   @doc """
-  Notifies the GenStage producer of a new event by ID via PubSub broadcast.
-
-  Intended for use after a successful `Repo.transaction/1` on a Multi built
-  with `emit_multi/4`, to trigger the fast-path GenStage processing in addition
-  to the guaranteed Oban path.
-
-  The `EventProducer` subscribes to the PubSub topic during its `init/1` and
-  receives the broadcast as a `handle_info/2` message. A direct cast to the
-  producer is not needed and would cause duplicate enqueuing of the same event.
+  Executes an `Ecto.Multi` and broadcasts any emitted Forja events after commit.
   """
-  @spec notify_producers(atom(), String.t()) :: :ok
-  def notify_producers(name, event_id) do
+  @spec transaction(Ecto.Multi.t(), atom()) :: {:ok, map()} | {:error, atom(), term(), map()}
+  def transaction(multi, name) do
     config = Config.get(name)
-    topic = "#{config.event_topic_prefix}:events"
-    Phoenix.PubSub.broadcast(config.pubsub, topic, {:forja_event, event_id})
+
+    case config.repo.transaction(multi) do
+      {:ok, results} ->
+        Enum.each(results, fn
+          {key, %Event{} = event} when is_atom(key) ->
+            if key |> Atom.to_string() |> String.starts_with?("forja_event_") do
+              safe_broadcast(config, event, :forja_event_emitted)
+            end
+
+          _ ->
+            :ok
+        end)
+
+        {:ok, results}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Loads an event by ID and broadcasts it to Forja subscribers.
+  """
+  @spec broadcast_event(atom(), String.t()) :: :ok | {:error, :not_found}
+  def broadcast_event(name, event_id) do
+    config = Config.get(name)
+
+    case config.repo.get(Event, event_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Event{} = event ->
+        safe_broadcast(config, event, :forja_event_emitted)
+        :ok
+    end
   end
 
   @impl Supervisor
@@ -429,20 +450,23 @@ defmodule Forja do
     Registry.store(config.name, table, catch_all)
 
     children = [
-      {ObanListener, name: config.name},
-      {EventProducer,
-       name: config.name, pubsub: config.pubsub, event_topic_prefix: config.event_topic_prefix},
-      {EventConsumer,
-       name: config.name,
-       producer: EventProducer.producer_name(config.name),
-       max_demand: config.consumer_pool_size}
+      {ObanListener, name: config.name}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  defp after_emit(_config, name, event) do
-    notify_producers(name, event.id)
+  defp after_emit(config, _name, event) do
+    safe_broadcast(config, event, :forja_event_emitted)
+  end
+
+  defp safe_broadcast(config, event, tag) do
+    topic = "#{config.event_topic_prefix}:events"
+    Phoenix.PubSub.broadcast(config.pubsub, topic, {tag, event})
+  rescue
+    error ->
+      Logger.warning("Forja: PubSub broadcast failed: #{inspect(error)}", domain: [:forja])
+      :ok
   end
 
   defp supervisor_name(name) do
@@ -451,6 +475,14 @@ defmodule Forja do
 
   defp maybe_put_idempotency_key(attrs, nil), do: attrs
   defp maybe_put_idempotency_key(attrs, key), do: Map.put(attrs, :idempotency_key, key)
+
+  defp resolve_queue(config, schema_module) do
+    if function_exported?(schema_module, :queue, 0) and schema_module.queue() != nil do
+      schema_module.queue()
+    else
+      config.default_queue
+    end
+  end
 
   defp resolve_type_string_for_key(type) when is_binary(type), do: type
   defp resolve_type_string_for_key(module) when is_atom(module), do: module.event_type()

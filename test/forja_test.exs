@@ -4,7 +4,6 @@ defmodule ForjaTest do
   alias Forja.Event
   alias Forja.TestEvents.EmitTestCreated
   alias Forja.TestEvents.EmitTestMulti
-
   defmodule EmitTestHandler do
     @behaviour Forja.Handler
 
@@ -23,6 +22,7 @@ defmodule ForjaTest do
 
     start_supervised!({Phoenix.PubSub, name: Forja.EmitTestPubSub})
     start_supervised!({Oban, name: Forja.TestOban, repo: Repo, queues: false, testing: :inline})
+    Phoenix.PubSub.subscribe(Forja.EmitTestPubSub, "forja:events")
 
     start_supervised!(
       {Forja,
@@ -51,6 +51,17 @@ defmodule ForjaTest do
 
       persisted = Repo.get!(Event, event.id)
       assert persisted.type == "emit_test:created"
+    end
+
+    test "broadcasts :forja_event_emitted after commit" do
+      assert {:ok, event} =
+               Forja.emit(:emit_test, EmitTestCreated,
+                 payload: %{order_id: "123"},
+                 source: "test"
+               )
+
+      assert_receive {:forja_event_emitted, %Event{id: event_id}}, 500
+      assert event_id == event.id
     end
 
     test "applies default values for optional fields" do
@@ -139,6 +150,56 @@ defmodule ForjaTest do
 
       assert {:ok, result} = Repo.transaction(multi)
       assert result[:"forja_event_emit_test:multi"].payload["static"] == true
+    end
+  end
+
+  describe "transaction/2" do
+    test "executes the multi and broadcasts emitted events" do
+      multi =
+        Ecto.Multi.new()
+        |> Ecto.Multi.run(:setup, fn _repo, _changes ->
+          {:ok, %{some_id: "abc"}}
+        end)
+        |> Forja.emit_multi(:emit_test, EmitTestMulti,
+          payload_fn: fn %{setup: setup} -> %{ref: setup.some_id} end,
+          source: "multi_test"
+        )
+
+      assert {:ok, result} = Forja.transaction(multi, :emit_test)
+      assert result[:"forja_event_emit_test:multi"].payload["ref"] == "abc"
+
+      assert_receive {:forja_event_emitted, %Event{id: event_id, type: "emit_test:multi"}}, 500
+      assert event_id == result[:"forja_event_emit_test:multi"].id
+    end
+
+    test "returns error on failure" do
+      multi =
+        Ecto.Multi.new()
+        |> Ecto.Multi.run(:boom, fn _repo, _changes -> {:error, :failed} end)
+
+      assert {:error, :boom, :failed, %{}} = Forja.transaction(multi, :emit_test)
+      refute_receive {:forja_event_emitted, _event}, 100
+    end
+  end
+
+  describe "broadcast_event/2" do
+    test "loads and broadcasts an event" do
+      assert {:ok, event} =
+               Forja.emit(:emit_test, EmitTestCreated,
+                 payload: %{order_id: "123"},
+                 source: "test"
+               )
+
+      assert_receive {:forja_event_emitted, %Event{id: initial_id}}, 500
+      assert initial_id == event.id
+
+      assert :ok = Forja.broadcast_event(:emit_test, event.id)
+      assert_receive {:forja_event_emitted, %Event{id: broadcast_id}}, 500
+      assert broadcast_id == event.id
+    end
+
+    test "returns error for a non-existent event" do
+      assert {:error, :not_found} = Forja.broadcast_event(:emit_test, Ecto.UUID.generate())
     end
   end
 end

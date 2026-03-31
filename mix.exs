@@ -1,7 +1,7 @@
 defmodule Forja.MixProject do
   use Mix.Project
 
-  @version "0.2.2"
+  @version "0.3.0"
   @source_url "https://github.com/lucas-stellet/forja"
 
   def project do
@@ -17,7 +17,7 @@ defmodule Forja.MixProject do
       name: "Forja",
       docs: docs(),
       description:
-        "Event Bus with dual-path processing for Elixir -- PubSub latency with Oban guarantees."
+        "Event Bus with Oban-backed processing for Elixir."
     ]
   end
 
@@ -35,7 +35,6 @@ defmodule Forja.MixProject do
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
       {:oban, "~> 2.18"},
-      {:gen_stage, "~> 1.2"},
       {:phoenix_pubsub, "~> 2.1"},
       {:telemetry, "~> 1.3"},
       {:jason, "~> 1.4"},
@@ -109,14 +108,8 @@ defmodule Forja.MixProject do
       Infrastructure: [
         Forja.Processor,
         Forja.Registry,
-        Forja.AdvisoryLock,
         Forja.ObanListener,
         Forja.Telemetry
-      ],
-      "GenStage Pipeline": [
-        Forja.EventProducer,
-        Forja.EventConsumer,
-        Forja.EventWorker
       ],
       Workers: [
         Forja.Workers.ProcessEventWorker,
