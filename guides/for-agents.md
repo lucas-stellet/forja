@@ -38,7 +38,7 @@ Add `forja` to `mix.exs`:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.1.0"}
+    {:forja, "~> 0.3.0"}
   ]
 end
 ```
@@ -144,7 +144,7 @@ end
 **Rules for handlers:**
 
 1. **Must return `:ok` or `{:error, reason}`** -- any other return value is treated as an error.
-2. **Must be idempotent** -- the same event can be delivered more than once in edge cases (e.g., advisory lock timeout between paths). Design handlers so that processing the same event twice produces the same result.
+2. **Must be idempotent** -- the same event may be delivered more than once in edge cases (e.g., Oban retry after mark_processed failure). Design handlers so that processing the same event twice produces the same result.
 3. **Do not perform long-running side effects inline** -- for operations that can fail independently (sending emails, calling external APIs), enqueue a separate Oban job from within the handler rather than doing it inline.
 4. **Use pattern matching on event type** -- if the handler subscribes to multiple event types, use function clause pattern matching on `event.type`.
 5. **Event types use `"namespace:action"` convention** -- e.g., `"order:created"`, `"user:registered"`, `"payment:refunded"`.
@@ -180,7 +180,7 @@ Add the handler module to the `:handlers` list in the Forja supervision config:
 ### Simple emission
 
 ```elixir
-Forja.emit(:my_app, "order:created",
+Forja.emit(:my_app, MyApp.Events.OrderCreated,
   payload: %{"order_id" => order.id, "total" => order.total},
   source: "orders"
 )
@@ -199,13 +199,13 @@ When the event must be atomic with a domain operation:
 ```elixir
 Ecto.Multi.new()
 |> Ecto.Multi.insert(:order, Order.changeset(%Order{}, attrs))
-|> Forja.emit_multi(:my_app, "order:created",
+|> Forja.emit_multi(:my_app, MyApp.Events.OrderCreated,
   payload_fn: fn %{order: order} ->
     %{"order_id" => order.id, "total" => order.total}
   end,
   source: "orders"
 )
-|> Repo.transaction()
+|> Forja.transaction(:my_app)
 ```
 
 **Important rules:**
@@ -213,7 +213,7 @@ Ecto.Multi.new()
 - Use `emit_multi/4` when the event must succeed or fail with the domain operation.
 - `payload_fn` receives the results of all previous Multi steps.
 - The Oban job and event insert happen inside the same transaction.
-- Call `Repo.transaction/1` on the Multi -- Forja does not call it for you.
+- Call `Forja.transaction/2` on the Multi -- pass the Forja name as second argument.
 
 ### Idempotent emission
 
@@ -349,7 +349,7 @@ end
 
 4. **The Forja name must be consistent.** The `:name` used in `Forja` supervision config, `Forja.emit/3`, `ReconciliationWorker` args, and test helpers must all match.
 
-5. **Handlers must be idempotent.** Both the GenStage and Oban paths may attempt to process the same event. Advisory locks prevent concurrent processing, but if the GenStage path processes and commits before the Oban path starts, the Oban path will skip. However, in edge cases (crash between processing and marking), an event can be delivered twice.
+5. **Handlers must be idempotent.** In edge cases (e.g., Oban retry after a mark_processed failure), an event can be delivered to handlers more than once.
 
 6. **Don't use `Repo.transaction` inside `emit/3`.** The `emit/3` function already runs in a transaction. If you need a transaction that includes both a domain operation and event emission, use `emit_multi/4`.
 
@@ -421,7 +421,7 @@ Forja.emit(:name, "type:action", payload: %{...}, idempotency_key: "unique-key")
 Multi.new()
 |> Multi.insert(:record, changeset)
 |> Forja.emit_multi(:name, "type:action", payload_fn: fn %{record: r} -> %{"id" => r.id} end)
-|> Repo.transaction()
+|> Forja.transaction(:name)
 ```
 
 ### Handler template

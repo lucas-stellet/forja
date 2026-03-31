@@ -1,18 +1,17 @@
 # Architecture
 
-Forja's dual-path design ensures events are processed quickly **and** reliably. This guide explains the internal architecture.
+Forja uses Oban as the sole processing engine. Events are persisted and enqueued atomically, with PubSub broadcasts for real-time notifications. This guide explains the internal architecture.
 
-## Dual-path processing
+## Event lifecycle
 
 When you call `Forja.emit/3`, two things happen inside a single database transaction:
 
 1. The event is inserted into the `forja_events` table
-2. An Oban job (`ProcessEventWorker`) is created
+2. An Oban job (`ProcessEventWorker`) is enqueued
 
 After the transaction commits:
 
-3. A PubSub broadcast notifies the GenStage producer
-4. The GenStage consumer picks up the event and processes it immediately
+3. A PubSub broadcast sends `{:forja_event_emitted, %Event{}}` (best-effort, `try/rescue` protected)
 
 ```
                     +-------------------+
@@ -25,47 +24,41 @@ After the transaction commits:
               +--------------+--------------+
               |                             |
       PubSub broadcast              Oban polls
-              |                             |
-      +-------v--------+           +-------v--------+
-      | GenStage        |           | ProcessEvent   |
-      | EventProducer   |           | Worker         |
-      | -> Consumer     |           |                |
-      +-------+--------+           +-------+--------+
-              |                             |
-              +-------------+---------------+
-                            |
-               advisory lock (exactly-once)
-                            |
-                    +-------v--------+
-                    |  Processor     |
-                    | (shared core)  |
-                    +----------------+
+      (best-effort notify)                 |
+              |                    +-------v--------+
+              v                    | ProcessEvent   |
+    {:forja_event_emitted,         | Worker         |
+     %Event{}}                     +-------+--------+
+                                           |
+                                   +-------v--------+
+                                   |  Processor     |
+                                   | (shared core)  |
+                                   +-------+--------+
+                                           |
+                                           v
+                                   {:forja_event_processed,
+                                    %Event{}}
 ```
 
-## Exactly-once processing
+PubSub is notification-only. It is not a processing trigger and never affects delivery guarantees.
 
-Three layers prevent duplicate processing:
+## Idempotent processing
 
-### 1. PostgreSQL advisory lock
+Two layers prevent duplicate processing:
 
-`pg_try_advisory_xact_lock` is acquired at the start of processing. If another path already holds the lock for this event, processing is skipped immediately. The lock is transaction-scoped and released automatically on commit/rollback.
+### 1. Oban unique constraint
 
-### 2. `processed_at` column check
+`ProcessEventWorker` uses `unique: [keys: [:event_id], period: 900]` to prevent duplicate jobs for the same event within a 15-minute window.
 
-Inside the advisory lock, the Processor checks if `processed_at` is already set. If the event was already processed (by the other path), it returns early.
+### 2. `processed_at` safety net
 
-### 3. Oban unique jobs
-
-The `ProcessEventWorker` uses Oban's `unique: [keys: [:event_id], period: 300]` to prevent duplicate jobs for the same event within a 5-minute window.
+The Processor loads the event and checks `processed_at` before dispatching handlers. If the event was already processed, it returns early. After all handlers run, the Processor marks the event via a non-bang `Repo.update/1`.
 
 ## Supervision tree
 
 ```
 Forja.Supervisor (strategy: :one_for_one)
   +-- Forja.ObanListener
-  +-- Forja.EventProducer (GenStage producer)
-  +-- Forja.EventConsumer (ConsumerSupervisor)
-        +-- Task (transient, one per event)
 ```
 
 ### ObanListener
@@ -74,25 +67,15 @@ A GenServer that attaches a telemetry handler to `[:oban, :job, :stop]`. When a 
 
 The telemetry callback resolves the listener by its **registered name** (not PID) to survive process restarts.
 
-### EventProducer
-
-A GenStage producer that subscribes to the PubSub topic `"{prefix}:events"`. When a `{:forja_event, event_id}` message arrives, the event ID is emitted to consumers via GenStage's native buffer.
-
-The buffer defaults to 10,000 events. When full, GenStage drops the oldest events -- this is safe because the Oban path guarantees delivery.
-
-### EventConsumer
-
-A `ConsumerSupervisor` that spawns one transient `Task` per event. Each task calls `Forja.Processor.process/3` with the `:genstage` path. The `max_demand` option controls concurrency (default: 4).
-
 ## Oban workers
 
 Two Oban workers run outside the supervision tree (managed by Oban's own supervisor):
 
 ### ProcessEventWorker
 
-- Queue: `:forja_events`
+- Queue: `:forja_events` (default), or per-event via the `queue` macro in `Event.Schema`
 - Max attempts: 3
-- Unique: by `event_id`, 300-second period
+- Unique: by `event_id`, 900-second period
 - Calls `Forja.Processor.process/3` with the `:oban` path
 
 ### ReconciliationWorker
@@ -100,8 +83,44 @@ Two Oban workers run outside the supervision tree (managed by Oban's own supervi
 - Queue: `:forja_reconciliation`
 - Max attempts: 1 (cron job, retries handled internally)
 - Runs periodically via Oban crontab
+- Skips events that have active Oban jobs before attempting processing
 
 Scans for events where `processed_at IS NULL` and `inserted_at` exceeds the threshold. For each stale event, attempts processing via the Processor. Tracks `reconciliation_attempts` and triggers dead letter handling when the limit is reached.
+
+## Per-event queue routing
+
+Event schema modules can declare a custom Oban queue using the `queue` macro. Forja prefixes the name with `forja_` internally:
+
+```elixir
+defmodule MyApp.Events.PaymentReceived do
+  use Forja.Event.Schema
+
+  event_type "payment:received"
+  queue :payments  # routes to :forja_payments
+
+  payload do
+    field :amount_cents, Zoi.integer() |> Zoi.positive()
+  end
+end
+```
+
+Events without a `queue` declaration use the instance's `:default_queue` (defaults to `:events`, i.e. `:forja_events`).
+
+## Transactional emission
+
+`Forja.transaction/2` wraps an `Ecto.Multi` that contains `emit_multi` steps. After a successful commit, it automatically broadcasts `{:forja_event_emitted, %Event{}}` for each emitted event:
+
+```elixir
+Ecto.Multi.new()
+|> Ecto.Multi.insert(:order, order_changeset)
+|> Forja.emit_multi(:my_app, MyApp.Events.OrderCreated,
+  payload_fn: fn %{order: order} -> %{order_id: order.id} end,
+  source: "orders"
+)
+|> Forja.transaction(:my_app)
+```
+
+`Forja.broadcast_event/2` allows manually broadcasting a previously emitted event by its ID.
 
 ## Dead letter handling
 
@@ -118,4 +137,4 @@ The `Processor` dispatches events to all matching handlers via the `Registry`. H
 
 Key behavior: **all handlers run regardless of individual failures**. If a handler returns `{:error, reason}` or raises an exception, the error is logged and telemetry is emitted, but remaining handlers still execute. The event is marked as processed after all handlers have been called.
 
-This design means handlers should be **idempotent** and should enqueue their own retry mechanism for operations that may fail (e.g., sending an email via a separate Oban job).
+This design means handlers should be **idempotent** and should enqueue their own retry mechanism for operations that may fail (e.g., sending an email via a separate Oban job). Handlers that define `on_failure/3` receive a callback on error or exception.

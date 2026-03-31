@@ -42,6 +42,23 @@ end
 
 **`schema_version/1`** sets the schema version (defaults to 1 if omitted). Increment this when the payload shape changes in a breaking way.
 
+**`queue/1`** sets the Oban queue for this event type. Forja prefixes the name with `forja_` internally. Optional — when omitted, the event uses the `default_queue` from the Forja config (default: `:events`, resolves to `:forja_events`).
+
+```elixir
+defmodule MyApp.Events.PaymentConfirmed do
+  use Forja.Event.Schema
+
+  event_type "payment:confirmed"
+  schema_version 1
+  queue :payments  # Oban job goes to :forja_payments
+
+  payload do
+    field :order_id, Zoi.string()
+    field :amount_cents, Zoi.integer() |> Zoi.positive()
+  end
+end
+```
+
 **`payload do ... end`** declares the fields using Zoi types:
 
 | Zoi type | Description |
@@ -98,7 +115,7 @@ Ecto.Multi.new()
     "amount_cents" => order.total_cents
   } end
 )
-|> Repo.transaction()
+|> Forja.transaction(:my_app)
 ```
 
 The payload is validated before the event is inserted into the database. If validation fails, the multi fails and the transaction rolls back.

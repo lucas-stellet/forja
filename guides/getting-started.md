@@ -15,7 +15,7 @@ Add `forja` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.1.0"}
+    {:forja, "~> 0.3.0"}
   ]
 end
 ```
@@ -111,16 +111,16 @@ Register it in your Forja configuration:
 ## Step 6: Emit your first event
 
 ```elixir
-Forja.emit(:my_app, "order:created",
-  payload: %{"order_id" => "12345", "total" => 4999},
+Forja.emit(:my_app, MyApp.Events.OrderCreated,
+  payload: %{order_id: "12345", total: 4999},
   source: "orders"
 )
 ```
 
-Your handler will process the event through the GenStage fast path (milliseconds) and Oban will also pick it up as a guaranteed backup.
+Oban will process the event and dispatch it to your handler.
 
 ## Next steps
 
-- Read the [Architecture guide](architecture.md) to understand the dual-path design
+- Read the [Architecture guide](architecture.md) to understand the Oban-based architecture
 - Learn about [Telemetry events](telemetry.md) for observability
 - Check the [Testing guide](testing.md) for verifying event emission in tests

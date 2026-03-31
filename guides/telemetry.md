@@ -16,7 +16,7 @@ Emitted when an event is persisted and broadcast.
 Emitted when a handler processes an event successfully.
 
 - **Measurements:** `%{duration: native_time}`
-- **Metadata:** `%{name: atom, type: string, handler: module, path: :genstage | :oban | :reconciliation | :inline}`
+- **Metadata:** `%{name: atom, type: string, handler: module, path: :oban | :reconciliation | :inline}`
 
 ### `[:forja, :event, :failed]`
 
@@ -24,13 +24,6 @@ Emitted when a handler returns `{:error, reason}` or raises an exception.
 
 - **Measurements:** `%{count: 1}`
 - **Metadata:** `%{name: atom, type: string, handler: module, path: atom, reason: term}`
-
-### `[:forja, :event, :skipped]`
-
-Emitted when the advisory lock is already held by another processing path.
-
-- **Measurements:** `%{count: 1}`
-- **Metadata:** `%{name: atom, event_id: binary, path: atom}`
 
 ### `[:forja, :event, :dead_letter]`
 
@@ -59,13 +52,6 @@ Emitted when an idempotency key prevents a duplicate event emission.
 
 - **Measurements:** `%{count: 1}`
 - **Metadata:** `%{name: atom, idempotency_key: string, existing_event_id: binary}`
-
-### `[:forja, :producer, :buffer_size]`
-
-Emitted with the GenStage producer buffer size.
-
-- **Measurements:** `%{size: non_neg_integer}`
-- **Metadata:** `%{name: atom}`
 
 ## Default Logger
 
@@ -98,7 +84,7 @@ The `:level` option determines which event categories are logged:
 
 | Level | Events logged |
 |-------|---------------|
-| `:debug` | All events (emitted, processed, skipped, deduplicated, reconciled, failed, dead_letter, abandoned) |
+| `:debug` | All events (emitted, processed, deduplicated, reconciled, failed, validation_failed, dead_letter, abandoned) |
 | `:info` | Lifecycle + problems (emitted, processed, reconciled, failed, dead_letter, abandoned) |
 | `:warning` | Problems only (failed, dead_letter, abandoned) |
 | `:error` | Critical only (dead_letter, abandoned) |

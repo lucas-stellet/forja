@@ -113,7 +113,7 @@ defmodule MyApp.Events.PaymentProcessor do
         %{order_id: payload["order_id"], user_ids: Enum.map(users, & &1.id)}
       end
     )
-    |> MyApp.Repo.transaction()
+    |> Forja.transaction(:my_app)
     |> case do
       {:ok, _} -> :ok
       {:error, _step, reason, _changes} -> {:error, reason}
