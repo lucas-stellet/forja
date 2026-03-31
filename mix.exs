@@ -1,7 +1,7 @@
 defmodule Forja.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.1"
   @source_url "https://github.com/lucas-stellet/forja"
 
   def project do
@@ -16,8 +16,7 @@ defmodule Forja.MixProject do
       package: package(),
       name: "Forja",
       docs: docs(),
-      description:
-        "Event Bus with Oban-backed processing for Elixir."
+      description: "Event Bus with Oban-backed processing for Elixir."
     ]
   end
 
