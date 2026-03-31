@@ -15,12 +15,10 @@ defmodule Forja.TelemetryTest do
         [:forja, :event, :emitted],
         [:forja, :event, :processed],
         [:forja, :event, :failed],
-        [:forja, :event, :skipped],
         [:forja, :event, :dead_letter],
         [:forja, :event, :abandoned],
         [:forja, :event, :reconciled],
-        [:forja, :event, :deduplicated],
-        [:forja, :producer, :buffer_size]
+        [:forja, :event, :deduplicated]
       ],
       fn event_name, measurements, metadata, _config ->
         send(test_pid, {:telemetry, event_name, measurements, metadata})
@@ -33,29 +31,39 @@ defmodule Forja.TelemetryTest do
     :ok
   end
 
-  test "emit_emitted/4 sends telemetry event" do
-    Telemetry.emit_emitted(:test, "order:created", "orders")
+  test "emit_emitted/2 sends telemetry event" do
+    Telemetry.emit_emitted(:test, %{type: "order:created", source: "orders"})
 
     assert_receive {:telemetry, [:forja, :event, :emitted], %{count: 1},
                     %{name: :test, type: "order:created", source: "orders"}}
   end
 
-  test "emit_emitted/4 includes payload when provided" do
-    Telemetry.emit_emitted(:test, "order:created", "orders", %{"id" => 1})
+  test "emit_emitted/2 includes payload when provided" do
+    Telemetry.emit_emitted(:test, %{type: "order:created", source: "orders", payload: %{"id" => 1}})
 
     assert_receive {:telemetry, [:forja, :event, :emitted], %{count: 1},
                     %{name: :test, type: "order:created", payload: %{"id" => 1}}}
   end
 
-  test "emit_processed/5 sends telemetry event with duration" do
-    Telemetry.emit_processed(:test, "order:created", FakeHandler, :genstage, 1_000)
+  test "emit_processed/2 sends telemetry event with duration" do
+    Telemetry.emit_processed(:test, %{
+      type: "order:created",
+      handler: FakeHandler,
+      path: :genstage,
+      duration: 1_000
+    })
 
     assert_receive {:telemetry, [:forja, :event, :processed], %{duration: 1_000},
                     %{name: :test, type: "order:created", handler: FakeHandler, path: :genstage}}
   end
 
-  test "emit_failed/5 sends telemetry event with reason" do
-    Telemetry.emit_failed(:test, "order:created", FakeHandler, :oban, :timeout)
+  test "emit_failed/2 sends telemetry event with reason" do
+    Telemetry.emit_failed(:test, %{
+      type: "order:created",
+      handler: FakeHandler,
+      path: :oban,
+      reason: :timeout
+    })
 
     assert_receive {:telemetry, [:forja, :event, :failed], %{count: 1},
                     %{
@@ -65,19 +73,6 @@ defmodule Forja.TelemetryTest do
                       path: :oban,
                       reason: :timeout
                     }}
-  end
-
-  test "emit_skipped/3 sends telemetry event" do
-    Telemetry.emit_skipped(:test, "event-uuid-123", :genstage)
-
-    assert_receive {:telemetry, [:forja, :event, :skipped], %{count: 1},
-                    %{name: :test, event_id: "event-uuid-123", path: :genstage}}
-  end
-
-  test "emit_buffer_size/2 sends telemetry event" do
-    Telemetry.emit_buffer_size(:test, 42)
-
-    assert_receive {:telemetry, [:forja, :producer, :buffer_size], %{size: 42}, %{name: :test}}
   end
 
   test "emit_dead_letter/3 sends telemetry event" do
@@ -139,7 +134,7 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders")
+          Telemetry.emit_emitted(:my_app, %{type: "order:created", source: "orders"})
         end)
 
       assert log =~ "Event emitted"
@@ -152,7 +147,12 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_processed(:my_app, "order:created", MyHandler, :oban, 5_000_000)
+          Telemetry.emit_processed(:my_app, %{
+            type: "order:created",
+            handler: MyHandler,
+            path: :oban,
+            duration: 5_000_000
+          })
         end)
 
       assert log =~ "Event processed"
@@ -166,7 +166,12 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_failed(:my_app, "order:created", MyHandler, :oban, :timeout)
+          Telemetry.emit_failed(:my_app, %{
+            type: "order:created",
+            handler: MyHandler,
+            path: :oban,
+            reason: :timeout
+          })
         end)
 
       assert log =~ "Handler failed"
@@ -201,29 +206,25 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
   end
 
   describe "level tiers" do
-    test "level: :debug includes skipped and deduplicated events" do
+    test "level: :debug includes deduplicated events" do
       Telemetry.attach_default_logger(level: :debug)
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_skipped(:my_app, "event-456", :genstage)
           Telemetry.emit_deduplicated(:my_app, "key-1", "event-789")
         end)
 
-      assert log =~ "Event skipped"
       assert log =~ "Event deduplicated"
     end
 
-    test "level: :info does NOT include skipped or deduplicated" do
+    test "level: :info does NOT include deduplicated" do
       Telemetry.attach_default_logger(level: :info)
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_skipped(:my_app, "event-456", :genstage)
           Telemetry.emit_deduplicated(:my_app, "key-1", "event-789")
         end)
 
-      refute log =~ "Event skipped"
       refute log =~ "Event deduplicated"
     end
 
@@ -232,9 +233,21 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders")
-          Telemetry.emit_processed(:my_app, "order:created", MyHandler, :oban, 1_000)
-          Telemetry.emit_failed(:my_app, "order:created", MyHandler, :oban, :timeout)
+          Telemetry.emit_emitted(:my_app, %{type: "order:created", source: "orders"})
+
+          Telemetry.emit_processed(:my_app, %{
+            type: "order:created",
+            handler: MyHandler,
+            path: :oban,
+            duration: 1_000
+          })
+
+          Telemetry.emit_failed(:my_app, %{
+            type: "order:created",
+            handler: MyHandler,
+            path: :oban,
+            reason: :timeout
+          })
         end)
 
       refute log =~ "Event emitted"
@@ -247,8 +260,15 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders")
-          Telemetry.emit_failed(:my_app, "order:created", MyHandler, :oban, :timeout)
+          Telemetry.emit_emitted(:my_app, %{type: "order:created", source: "orders"})
+
+          Telemetry.emit_failed(:my_app, %{
+            type: "order:created",
+            handler: MyHandler,
+            path: :oban,
+            reason: :timeout
+          })
+
           Telemetry.emit_dead_letter(:my_app, "event-123", :max_attempts)
         end)
 
@@ -264,7 +284,11 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders", %{"order_id" => 42})
+          Telemetry.emit_emitted(:my_app, %{
+            type: "order:created",
+            source: "orders",
+            payload: %{"order_id" => 42}
+          })
         end)
 
       assert log =~ "order_id"
@@ -276,7 +300,11 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders", %{"order_id" => 42})
+          Telemetry.emit_emitted(:my_app, %{
+            type: "order:created",
+            source: "orders",
+            payload: %{"order_id" => 42}
+          })
         end)
 
       refute log =~ "order_id"
@@ -289,7 +317,7 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders")
+          Telemetry.emit_emitted(:my_app, %{type: "order:created", source: "orders"})
         end)
 
       # Extract the JSON portion from the log line
@@ -304,8 +332,14 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders")
-          Telemetry.emit_processed(:my_app, "order:created", MyHandler, :oban, 1_000)
+          Telemetry.emit_emitted(:my_app, %{type: "order:created", source: "orders"})
+
+          Telemetry.emit_processed(:my_app, %{
+            type: "order:created",
+            handler: MyHandler,
+            path: :oban,
+            duration: 1_000
+          })
         end)
 
       assert log =~ "Event emitted"
@@ -320,7 +354,7 @@ defmodule Forja.Telemetry.DefaultLoggerTest do
 
       log =
         capture_log([level: :debug], fn ->
-          Telemetry.emit_emitted(:my_app, "order:created", "orders")
+          Telemetry.emit_emitted(:my_app, %{type: "order:created", source: "orders"})
         end)
 
       refute log =~ "Event emitted"

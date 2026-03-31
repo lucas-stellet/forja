@@ -16,7 +16,7 @@ defmodule Forja.Telemetry do
 
   | Level      | Events logged                                                     |
   |------------|-------------------------------------------------------------------|
-  | `:debug`   | All events (emitted, processed, skipped, deduplicated, reconciled, failed, validation_failed, dead_letter, abandoned) |
+  | `:debug`   | All events (emitted, processed, deduplicated, reconciled, failed, validation_failed, dead_letter, abandoned) |
   | `:info`    | Lifecycle + problems (emitted, processed, reconciled, failed, validation_failed, dead_letter, abandoned) |
   | `:warning` | Problems only (failed, validation_failed, dead_letter, abandoned) |
   | `:error`   | Critical only (dead_letter, abandoned)                            |
@@ -43,21 +43,19 @@ defmodule Forja.Telemetry do
 
   ## Emitted events
 
-    * `[:forja, :event, :emitted]` - When an event is persisted and emitted
+    * `emit_emitted(name, %{type: type} = attrs)` emits `[:forja, :event, :emitted]`
       * Measurements: `%{count: 1}`
       * Metadata: `%{name: atom, type: string, source: string, payload: map | nil, correlation_id: string | nil}`
 
-    * `[:forja, :event, :processed]` - When a handler processes successfully
+    * `emit_processed(name, %{type: type, handler: handler, path: path, duration: duration})`
+      emits `[:forja, :event, :processed]` when a handler processes successfully
       * Measurements: `%{duration: native_time}`
       * Metadata: `%{name: atom, type: string, handler: module, path: :genstage | :oban}`
 
-    * `[:forja, :event, :failed]` - When a handler fails
+    * `emit_failed(name, %{type: type, handler: handler, path: path, reason: reason})`
+      emits `[:forja, :event, :failed]` when a handler fails
       * Measurements: `%{count: 1}`
       * Metadata: `%{name: atom, type: string, handler: module, path: atom, reason: term}`
-
-    * `[:forja, :event, :skipped]` - When the advisory lock was already held
-      * Measurements: `%{count: 1}`
-      * Metadata: `%{name: atom, event_id: binary, path: atom}`
 
     * `[:forja, :event, :dead_letter]` - When Oban discards a job (all attempts exhausted)
       * Measurements: `%{count: 1}`
@@ -78,10 +76,6 @@ defmodule Forja.Telemetry do
     * `[:forja, :event, :validation_failed]` - When payload validation fails at emit-time
       * Measurements: `%{count: 1}`
       * Metadata: `%{name: atom, type: string | module, errors: term}`
-
-    * `[:forja, :producer, :buffer_size]` - Producer buffer size
-      * Measurements: `%{size: non_neg_integer}`
-      * Metadata: `%{name: atom}`
   """
 
   require Logger
@@ -92,13 +86,11 @@ defmodule Forja.Telemetry do
     [:forja, :event, :emitted],
     [:forja, :event, :processed],
     [:forja, :event, :failed],
-    [:forja, :event, :skipped],
     [:forja, :event, :dead_letter],
     [:forja, :event, :abandoned],
     [:forja, :event, :reconciled],
     [:forja, :event, :deduplicated],
-    [:forja, :event, :validation_failed],
-    [:forja, :producer, :buffer_size]
+    [:forja, :event, :validation_failed]
   ]
 
   # Maps each event category to the Logger level it emits at
@@ -106,9 +98,7 @@ defmodule Forja.Telemetry do
     emitted: :info,
     processed: :info,
     reconciled: :info,
-    skipped: :debug,
     deduplicated: :debug,
-    buffer_size: :debug,
     failed: :warning,
     dead_letter: :error,
     abandoned: :error,
@@ -227,18 +217,6 @@ defmodule Forja.Telemetry do
     end)
   end
 
-  def handle_event([:forja, :event, :skipped], _measurements, meta, opts) do
-    log(opts, @event_levels.skipped, fn ->
-      %{
-        message: "Event skipped (locked)",
-        event: "event:skipped",
-        name: to_string(meta.name),
-        event_id: meta.event_id,
-        path: to_string(meta.path)
-      }
-    end)
-  end
-
   def handle_event([:forja, :event, :dead_letter], _measurements, meta, opts) do
     log(opts, @event_levels.dead_letter, fn ->
       %{
@@ -298,17 +276,6 @@ defmodule Forja.Telemetry do
     end)
   end
 
-  def handle_event([:forja, :producer, :buffer_size], measurements, meta, opts) do
-    log(opts, @event_levels.buffer_size, fn ->
-      %{
-        message: "Producer buffer",
-        event: "producer:buffer_size",
-        name: to_string(meta.name),
-        size: measurements.size
-      }
-    end)
-  end
-
   def handle_event(_event, _measurements, _meta, _opts), do: :ok
 
   # ── Telemetry Emission Functions ────────────────────────────────────
@@ -316,10 +283,10 @@ defmodule Forja.Telemetry do
   @doc """
   Emits a telemetry event for event emission.
   """
-  @spec emit_emitted(atom(), String.t(), String.t() | nil, map() | nil, String.t() | nil) :: :ok
-  def emit_emitted(name, type, source, payload \\ nil, correlation_id \\ nil) do
-    meta = %{name: name, type: type, source: source, correlation_id: correlation_id}
-    meta = if payload, do: Map.put(meta, :payload, payload), else: meta
+  @spec emit_emitted(atom(), map()) :: :ok
+  def emit_emitted(name, %{type: type} = attrs) do
+    meta = %{name: name, type: type, source: attrs[:source], correlation_id: attrs[:correlation_id]}
+    meta = if attrs[:payload], do: Map.put(meta, :payload, attrs.payload), else: meta
 
     :telemetry.execute([:forja, :event, :emitted], %{count: 1}, meta)
   end
@@ -327,8 +294,8 @@ defmodule Forja.Telemetry do
   @doc """
   Emits a telemetry event for successful handler processing.
   """
-  @spec emit_processed(atom(), String.t(), module(), atom(), integer()) :: :ok
-  def emit_processed(name, type, handler, path, duration) do
+  @spec emit_processed(atom(), map()) :: :ok
+  def emit_processed(name, %{type: type, handler: handler, path: path, duration: duration}) do
     :telemetry.execute(
       [:forja, :event, :processed],
       %{duration: duration},
@@ -339,36 +306,12 @@ defmodule Forja.Telemetry do
   @doc """
   Emits a telemetry event for handler failure.
   """
-  @spec emit_failed(atom(), String.t(), module(), atom(), term()) :: :ok
-  def emit_failed(name, type, handler, path, reason) do
+  @spec emit_failed(atom(), map()) :: :ok
+  def emit_failed(name, %{type: type, handler: handler, path: path, reason: reason}) do
     :telemetry.execute(
       [:forja, :event, :failed],
       %{count: 1},
       %{name: name, type: type, handler: handler, path: path, reason: reason}
-    )
-  end
-
-  @doc """
-  Emits a telemetry event for a skip due to advisory lock.
-  """
-  @spec emit_skipped(atom(), String.t(), atom()) :: :ok
-  def emit_skipped(name, event_id, path) do
-    :telemetry.execute(
-      [:forja, :event, :skipped],
-      %{count: 1},
-      %{name: name, event_id: event_id, path: path}
-    )
-  end
-
-  @doc """
-  Emits a telemetry event with the producer buffer size.
-  """
-  @spec emit_buffer_size(atom(), non_neg_integer()) :: :ok
-  def emit_buffer_size(name, size) do
-    :telemetry.execute(
-      [:forja, :producer, :buffer_size],
-      %{size: size},
-      %{name: name}
     )
   end
 
@@ -465,5 +408,4 @@ defmodule Forja.Telemetry do
   end
 
   defp category_for([:forja, :event, action]), do: action
-  defp category_for([:forja, :producer, :buffer_size]), do: :buffer_size
 end
