@@ -9,7 +9,7 @@
 
 *Where events are forged into certainty.*
 
-**Event Bus with dual-path processing for Elixir** -- PubSub latency with Oban delivery guarantees.
+**Event Bus with Oban-backed processing for Elixir** -- persistent, exactly-once event delivery with PubSub notifications.
 
 [Leia em Portugues](README.pt-BR.md)
 
@@ -17,16 +17,16 @@
 
 ## Why Forja?
 
-> **Forja** (/ˈfɔʁ.ʒɐ/) -- Portuguese for *forge*. A forge shapes raw metal through fire and hammer into something reliable and enduring. Forja does the same with your events: the fast path is the fire, the guaranteed path is the hammer, and what comes out is an event you can trust was processed exactly once.
+> **Forja** (/ˈfɔʁ.ʒɐ/) -- Portuguese for *forge*. A forge shapes raw metal through fire and hammer into something reliable and enduring. Forja does the same with your events: Oban is the hammer that guarantees delivery, PubSub is the spark that notifies instantly, and what comes out is an event you can trust was processed exactly once.
 
-Most event systems force a trade-off: **fast but unreliable** (PubSub) or **reliable but slow** (persistent queues). Forja gives you both.
+Most event systems force a trade-off: **fast but unreliable** (PubSub) or **reliable but slow** (persistent queues). Forja gives you both -- Oban-backed persistence with PubSub best-effort notifications.
 
-Every event travels two paths simultaneously:
+Every event is atomically persisted and enqueued:
 
-- **Fast path** -- GenStage via PubSub delivers events in milliseconds
-- **Guaranteed path** -- Oban persists the event and processes it as a background job
+- **Guaranteed processing** -- Oban persists the event and processes it as a background job with retries
+- **Instant notification** -- PubSub broadcasts after commit for real-time subscribers (best-effort)
 
-Three-layer deduplication (PostgreSQL advisory locks + `processed_at` column + Oban unique jobs) ensures **exactly-once processing** regardless of which path wins.
+Three-layer deduplication (PostgreSQL advisory locks + `processed_at` column + Oban unique jobs) ensures **exactly-once processing**.
 
 ```
 App Code
@@ -35,13 +35,13 @@ App Code
   |
   +-- INSERT event + Oban job (single transaction)
   |
-  +-- PubSub broadcast ---------> GenStage pipeline (fast)
-  |                                    |
-  +-- Oban polls -------> ProcessEventWorker (guaranteed)
-                                       |
-                          advisory lock + processed_at check
-                                       |
-                               Handler.handle_event/2
+  +-- After commit: PubSub broadcast (best-effort notification)
+  |
+  +-- Oban polls -------> ProcessEventWorker
+                                  |
+                     advisory lock + processed_at check
+                                  |
+                          Handler.handle_event/2
 ```
 
 ## Installation
@@ -51,7 +51,7 @@ Add `forja` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.1.0"}
+    {:forja, "~> 0.3.0"}
   ]
 end
 ```
@@ -131,7 +131,7 @@ Forja.emit(:my_app, "payment:received",
 
 ### Transactional emission
 
-Compose event emission with your domain operations in a single database transaction:
+Compose event emission with your domain operations in a single database transaction using `Forja.emit_multi/4` and `Forja.transaction/2`:
 
 ```elixir
 def create_order(attrs) do
@@ -143,13 +143,15 @@ def create_order(attrs) do
     end,
     source: "orders"
   )
-  |> Repo.transaction()
+  |> Forja.transaction(:my_app)
   |> case do
     {:ok, %{order: order}} -> {:ok, order}
     {:error, :order, changeset, _} -> {:error, changeset}
   end
 end
 ```
+
+`Forja.transaction/2` wraps `Ecto.Multi` and automatically broadcasts emitted events via PubSub after commit. You can also manually broadcast a previously emitted event with `Forja.broadcast_event/2`.
 
 ### Writing handlers
 
@@ -172,6 +174,13 @@ defmodule MyApp.Events.OrderNotifier do
     MyApp.Mailer.send_shipping_notification(order)
     :ok
   end
+
+  # Optional: called when handle_event/2 fails or raises
+  @impl Forja.Handler
+  def on_failure(event, reason, _meta) do
+    MyApp.Alerts.notify("Handler failed for #{event.type}: #{inspect(reason)}")
+    :ok
+  end
 end
 ```
 
@@ -191,6 +200,55 @@ defmodule MyApp.Events.AuditLogger do
   end
 end
 ```
+
+### Event schemas
+
+Define typed, validated event contracts using `Forja.Event.Schema` with [Zoi](https://hexdocs.pm/zoi) validation:
+
+```elixir
+defmodule MyApp.Events.OrderCreated do
+  use Forja.Event.Schema
+
+  event_type "order:created"
+  schema_version 2
+  queue :payments  # routes to :forja_payments queue
+
+  payload do
+    field :order_id, Zoi.string()
+    field :amount_cents, Zoi.integer() |> Zoi.positive()
+    field :currency, Zoi.string() |> Zoi.default("USD"), required: false
+  end
+
+  # Transform old payloads to current schema version
+  def upcast(1, payload) do
+    %{"order_id" => payload["order_id"],
+      "amount_cents" => payload["total"],
+      "currency" => "USD"}
+  end
+end
+```
+
+Schemas provide compile-time validation, runtime payload parsing via `parse_payload/1`, automatic upcasting from older versions, and optional per-event queue routing.
+
+### Correlation and causation
+
+Forja automatically tracks event chains with correlation and causation IDs:
+
+```elixir
+# Root event gets an auto-generated correlation_id
+{:ok, root} = Forja.emit(:my_app, "order:created",
+  payload: %{"order_id" => "123"}
+)
+
+# Child events inherit correlation_id and set causation_id to parent
+{:ok, child} = Forja.emit(:my_app, "payment:charged",
+  payload: %{"order_id" => "123"},
+  correlation_id: root.correlation_id,
+  causation_id: root.id
+)
+```
+
+This enables full event tracing across your system via `correlation_id` and `causation_id` columns.
 
 ### Dead letter handling
 
@@ -248,12 +306,29 @@ defmodule MyApp.OrderTest do
 
     # All handlers have now executed
   end
+
+  test "event causation chain" do
+    {:ok, parent} = Forja.emit(:my_app, "order:created", payload: %{"id" => 1})
+    {:ok, child} = Forja.emit(:my_app, "payment:charged",
+      payload: %{"id" => 1},
+      causation_id: parent.id,
+      correlation_id: parent.correlation_id
+    )
+
+    assert_event_caused_by(:my_app, child.id, parent.id)
+  end
 end
 ```
 
 ## Telemetry
 
-Forja emits telemetry events for observability:
+Forja ships with a built-in default logger you can opt into:
+
+```elixir
+Forja.Telemetry.attach_default_logger(:my_app, level: :info)
+```
+
+All telemetry events:
 
 | Event | Meaning |
 |-------|---------|
@@ -265,6 +340,9 @@ Forja emits telemetry events for observability:
 | `[:forja, :event, :abandoned]` | Reconciliation exhausted retries |
 | `[:forja, :event, :reconciled]` | Reconciliation processed a stale event |
 | `[:forja, :event, :deduplicated]` | Idempotency key prevented duplicate |
+| `[:forja, :event, :validation_failed]` | Payload validation failed at emit-time |
+
+For detailed telemetry metadata and custom handler examples, see the [Telemetry guide](https://hexdocs.pm/forja/telemetry.html).
 
 ## Configuration
 
@@ -274,7 +352,7 @@ Forja emits telemetry events for observability:
 | `:repo` | *required* | Ecto.Repo module |
 | `:pubsub` | *required* | Phoenix.PubSub module |
 | `:oban_name` | `Oban` | Oban instance name |
-| `:consumer_pool_size` | `4` | Max concurrent GenStage event processing |
+| `:default_queue` | `:events` | Default Oban queue (resolves to `:forja_events`) |
 | `:event_topic_prefix` | `"forja"` | PubSub topic prefix |
 | `:handlers` | `[]` | List of `Forja.Handler` modules |
 | `:dead_letter` | `nil` | Module implementing `Forja.DeadLetter` |
@@ -291,24 +369,17 @@ reconciliation: [
 ]
 ```
 
-## For Agents
+## Guides
 
-If you are an AI coding agent implementing Forja, read the [For Agents guide](guides/for-agents.md). It provides step-by-step instructions, best practices, common pitfalls, and verification steps for each integration phase.
+For in-depth documentation beyond this README:
 
-## Architecture
-
-Forja runs as a supervisor with three children:
-
-- **ObanListener** -- Watches for discarded Oban jobs to trigger dead letter handling
-- **EventProducer** -- GenStage producer that receives PubSub broadcasts and buffers event IDs
-- **EventConsumer** -- ConsumerSupervisor that spawns a transient Task per event
-
-The **Processor** is the shared functional core called by both paths. It acquires an advisory lock, loads the event, dispatches to handlers, and marks the event as processed.
-
-Two Oban workers run outside the supervision tree:
-
-- **ProcessEventWorker** -- Queue `:forja_events`, the guaranteed delivery path
-- **ReconciliationWorker** -- Queue `:forja_reconciliation`, periodic sweep for stale events
+- [Getting Started](https://hexdocs.pm/forja/getting-started.html) -- Step-by-step setup walkthrough
+- [Architecture](https://hexdocs.pm/forja/architecture.html) -- Event lifecycle, idempotency, and supervision
+- [Event Schemas](https://hexdocs.pm/forja/event-schemas.html) -- Typed contracts, versioning, and upcasting
+- [Error Handling](https://hexdocs.pm/forja/error-handling.html) -- `on_failure/3`, Sage integration, dead letters
+- [Telemetry](https://hexdocs.pm/forja/telemetry.html) -- Observability, custom handlers, and the default logger
+- [Testing](https://hexdocs.pm/forja/testing.html) -- Test helpers and patterns
+- [For Agents](https://hexdocs.pm/forja/for-agents.html) -- Step-by-step guide for AI coding agents
 
 ## License
 
