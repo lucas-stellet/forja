@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-06
+
+### Added
+
+- `emit/1,2` and `emit_multi/2,3` generated on schema modules when `:forja` option is provided
+- `:forja` option to bind a schema to a Forja instance for centralized emission
+- `:source` option to set a default source for emitted events
+- Overridable `idempotency_key/1` callback to derive idempotency keys from payload
+
+### Changed
+
+- **Breaking:** `event_type`, `schema_version`, `queue` are now options passed to `use Forja.Event.Schema` instead of standalone macros (follows the Oban.Worker pattern)
+- `upcast/2` remains an overridable callback (unchanged behavior)
+
+### Migration
+
+```elixir
+# Before (0.3.x)
+use Forja.Event.Schema
+
+event_type "order:created"
+schema_version 2
+queue :payments
+
+# After (0.4.0)
+use Forja.Event.Schema,
+  event_type: "order:created",
+  schema_version: 2,
+  queue: :payments
+```
+
+## [0.3.2] - 2026-04-06
+
+### Changed
+
+- Updated README to reflect Oban-only architecture (removed GenStage references)
+- Added event schemas, correlation/causation IDs, `on_failure/3`, and telemetry docs to README
+- Added links to HexDocs guides
+- Fixed version in installation instructions (`~> 0.1.0` → `~> 0.3.0`)
+
+## [0.3.1] - 2026-03-30
+
+### Changed
+
+- Updated documentation and guides for v0.3.0 architecture
+
+## [0.3.0] - 2026-03-30
+
+### Changed
+
+- **Breaking:** Migrated to Oban-only architecture — removed GenStage consumers (EventProducer, EventConsumer)
+- PubSub broadcast is now best-effort notification only (not a processing path)
+- Supervision tree reduced to a single child (ObanListener)
+- Refactored telemetry event APIs
+
+### Removed
+
+- GenStage-based fast path processing
+- `consumer_pool_size` configuration option
+- EventProducer and EventConsumer modules
+
 ## [0.2.2] - 2026-03-26
 
 ### Added
