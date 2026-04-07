@@ -207,16 +207,22 @@ Define typed, validated event contracts using `Forja.Event.Schema` with [Zoi](ht
 
 ```elixir
 defmodule MyApp.Events.OrderCreated do
-  use Forja.Event.Schema
-
-  event_type "order:created"
-  schema_version 2
-  queue :payments  # routes to :forja_payments queue
+  use Forja.Event.Schema,
+    event_type: "order:created",
+    schema_version: 2,
+    queue: :payments,       # routes to :forja_payments queue
+    forja: :my_app,         # enables emit/1,2 and emit_multi/2,3
+    source: "checkout"      # default source for emitted events
 
   payload do
     field :order_id, Zoi.string()
     field :amount_cents, Zoi.integer() |> Zoi.positive()
     field :currency, Zoi.string() |> Zoi.default("USD"), required: false
+  end
+
+  # Derive idempotency key from payload (default: nil)
+  def idempotency_key(payload) do
+    "order_created:#{payload["order_id"]}"
   end
 
   # Transform old payloads to current schema version
@@ -228,7 +234,27 @@ defmodule MyApp.Events.OrderCreated do
 end
 ```
 
-Schemas provide compile-time validation, runtime payload parsing via `parse_payload/1`, automatic upcasting from older versions, and optional per-event queue routing.
+When `:forja` is provided, the schema module generates `emit/1,2` and `emit_multi/2,3` — so you can emit events directly from the schema:
+
+```elixir
+# All defaults (source, idempotency_key) come from the schema
+MyApp.Events.OrderCreated.emit(%{order_id: "123", amount_cents: 5000})
+
+# Override source per-call when needed
+MyApp.Events.OrderCreated.emit(%{order_id: "123", amount_cents: 5000},
+  source: "manual_payment"
+)
+
+# In an Ecto.Multi
+Ecto.Multi.new()
+|> Ecto.Multi.insert(:order, changeset)
+|> MyApp.Events.OrderCreated.emit_multi(
+  payload_fn: fn %{order: o} -> %{order_id: o.id, amount_cents: o.total} end
+)
+|> Forja.transaction(:my_app)
+```
+
+Schemas provide compile-time validation, runtime payload parsing via `parse_payload/1`, automatic upcasting from older versions, per-event queue routing, and centralized emission via `emit/1,2`.
 
 ### Correlation and causation
 

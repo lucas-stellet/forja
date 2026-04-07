@@ -7,11 +7,10 @@ defmodule Forja.CorrelationPropagationTest do
   @moduletag capture_log: true
 
   defmodule ChainEvent do
-    use Forja.Event.Schema
-    event_type "correlation_test:chain"
+    use Forja.Event.Schema, event_type: "correlation_test:chain"
 
     payload do
-      field :step, Zoi.string()
+      field(:step, Zoi.string())
     end
   end
 
@@ -24,9 +23,7 @@ defmodule Forja.CorrelationPropagationTest do
     @impl true
     def handle_event(%Event{} = _event, _meta) do
       {:ok, child} =
-        Forja.emit(:propagation_test, ChainEvent,
-          payload: %{step: "child"}
-        )
+        Forja.emit(:propagation_test, ChainEvent, payload: %{step: "child"})
 
       send(Process.whereis(:propagation_test_pid), {:child_emitted, child})
       :ok

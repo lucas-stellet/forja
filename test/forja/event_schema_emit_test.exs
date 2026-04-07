@@ -4,10 +4,7 @@ defmodule Forja.EventSchemaEmitTest do
   alias Forja.Event
 
   defmodule ValidTestEvent do
-    use Forja.Event.Schema
-
-    event_type("schema_test:valid")
-    schema_version(2)
+    use Forja.Event.Schema, event_type: "schema_test:valid", schema_version: 2
 
     payload do
       field(:user_id, Zoi.string())
@@ -17,10 +14,7 @@ defmodule Forja.EventSchemaEmitTest do
   end
 
   defmodule InvalidTestEvent do
-    use Forja.Event.Schema
-
-    event_type("schema_test:invalid")
-    schema_version(1)
+    use Forja.Event.Schema, event_type: "schema_test:invalid"
 
     payload do
       field(:user_id, Zoi.string())
@@ -29,14 +23,46 @@ defmodule Forja.EventSchemaEmitTest do
   end
 
   defmodule MissingRequiredEvent do
-    use Forja.Event.Schema
-
-    event_type("schema_test:missing_required")
-    schema_version(1)
+    use Forja.Event.Schema, event_type: "schema_test:missing_required"
 
     payload do
       field(:user_id, Zoi.string())
       field(:email, Zoi.string(), required: true)
+    end
+  end
+
+  defmodule EmittableEvent do
+    use Forja.Event.Schema,
+      event_type: "schema_test:emittable",
+      forja: :schema_emit_test,
+      source: "test_source",
+      queue: :payments
+
+    payload do
+      field(:order_id, Zoi.string())
+      field(:amount, Zoi.integer() |> Zoi.positive())
+    end
+
+    def idempotency_key(payload) do
+      "emittable:#{payload["order_id"]}"
+    end
+  end
+
+  defmodule EmittableNoIdempotencyEvent do
+    use Forja.Event.Schema,
+      event_type: "schema_test:emittable_no_idemp",
+      forja: :schema_emit_test
+
+    payload do
+      field(:name, Zoi.string())
+    end
+  end
+
+  defmodule NonEmittableEvent do
+    use Forja.Event.Schema, event_type: "schema_test:non_emittable"
+
+    payload do
+      field(:name, Zoi.string())
     end
   end
 
@@ -181,6 +207,115 @@ defmodule Forja.EventSchemaEmitTest do
       assert hd(telemetry_errors) |> Map.has_key?(:field)
 
       :telemetry.detach("test-validation-failed-#{inspect(ref)}")
+    end
+  end
+
+  describe "Schema.emit/1,2" do
+    test "emits event with schema defaults" do
+      assert {:ok, event} = EmittableEvent.emit(%{order_id: "o1", amount: 100})
+
+      assert event.type == "schema_test:emittable"
+      assert event.payload == %{"order_id" => "o1", "amount" => 100}
+      assert event.source == "test_source"
+      assert event.idempotency_key == "emittable:o1"
+    end
+
+    test "source can be overridden" do
+      assert {:ok, event} =
+               EmittableEvent.emit(%{order_id: "o2", amount: 200}, source: "manual")
+
+      assert event.source == "manual"
+      assert event.idempotency_key == "emittable:o2"
+    end
+
+    test "idempotency_key can be overridden" do
+      assert {:ok, event} =
+               EmittableEvent.emit(%{order_id: "o3", amount: 300},
+                 idempotency_key: "custom-key"
+               )
+
+      assert event.idempotency_key == "custom-key"
+    end
+
+    test "correlation_id and causation_id can be passed" do
+      corr_id = Ecto.UUID.generate()
+      cause_id = Ecto.UUID.generate()
+
+      assert {:ok, event} =
+               EmittableEvent.emit(%{order_id: "o4", amount: 400},
+                 correlation_id: corr_id,
+                 causation_id: cause_id
+               )
+
+      assert event.correlation_id == corr_id
+      assert event.causation_id == cause_id
+    end
+
+    test "schema without idempotency_key override emits with nil key" do
+      assert {:ok, event} = EmittableNoIdempotencyEvent.emit(%{name: "test"})
+
+      assert event.type == "schema_test:emittable_no_idemp"
+      assert event.idempotency_key == nil
+      assert event.source == nil
+    end
+
+    test "invalid payload returns validation error" do
+      assert {:error, %Forja.ValidationError{}} =
+               EmittableEvent.emit(%{order_id: "o5", amount: -1})
+    end
+
+    test "idempotent emit returns :already_processed" do
+      assert {:ok, _} = EmittableEvent.emit(%{order_id: "dup1", amount: 100})
+
+      # Mark as processed so the second emit returns :already_processed
+      event = Repo.one!(Forja.Event)
+      Repo.update!(Forja.Event.mark_processed_changeset(event))
+
+      assert {:ok, :already_processed} = EmittableEvent.emit(%{order_id: "dup1", amount: 100})
+    end
+  end
+
+  describe "Schema.emit_multi/2,3" do
+    test "adds event to Multi with schema defaults" do
+      assert {:ok, result} =
+               Ecto.Multi.new()
+               |> EmittableEvent.emit_multi(payload: %{order_id: "m1", amount: 500})
+               |> Forja.transaction(:schema_emit_test)
+
+      event = result[:"forja_event_schema_test:emittable"]
+      assert event.type == "schema_test:emittable"
+      assert event.source == "test_source"
+      assert event.idempotency_key == "emittable:m1"
+    end
+
+    test "works with payload_fn" do
+      assert {:ok, result} =
+               Ecto.Multi.new()
+               |> Ecto.Multi.run(:data, fn _repo, _changes ->
+                 {:ok, %{order_id: "m2", amount: 600}}
+               end)
+               |> EmittableEvent.emit_multi(
+                 payload_fn: fn %{data: data} ->
+                   %{order_id: data.order_id, amount: data.amount}
+                 end
+               )
+               |> Forja.transaction(:schema_emit_test)
+
+      event = result[:"forja_event_schema_test:emittable"]
+      assert event.type == "schema_test:emittable"
+      assert event.payload == %{"order_id" => "m2", "amount" => 600}
+    end
+  end
+
+  describe "Schema without forja option" do
+    test "does not generate emit/1,2" do
+      refute function_exported?(NonEmittableEvent, :emit, 1)
+      refute function_exported?(NonEmittableEvent, :emit, 2)
+    end
+
+    test "does not generate emit_multi/2,3" do
+      refute function_exported?(NonEmittableEvent, :emit_multi, 1)
+      refute function_exported?(NonEmittableEvent, :emit_multi, 2)
     end
   end
 end

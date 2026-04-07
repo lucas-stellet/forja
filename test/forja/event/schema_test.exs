@@ -3,10 +3,7 @@ defmodule Forja.Event.SchemaTest do
 
   # Event schemas under test
   defmodule ValidEvent do
-    use Forja.Event.Schema
-
-    event_type("test:valid")
-    schema_version(1)
+    use Forja.Event.Schema, event_type: "test:valid"
 
     payload do
       field(:user_id, Zoi.string())
@@ -16,10 +13,7 @@ defmodule Forja.Event.SchemaTest do
   end
 
   defmodule VersionedEvent do
-    use Forja.Event.Schema
-
-    event_type("test:versioned")
-    schema_version(2)
+    use Forja.Event.Schema, event_type: "test:versioned", schema_version: 2
 
     payload do
       field(:user_id, Zoi.string())
@@ -32,17 +26,11 @@ defmodule Forja.Event.SchemaTest do
   end
 
   defmodule MinimalEvent do
-    use Forja.Event.Schema
-
-    event_type("test:minimal")
+    use Forja.Event.Schema, event_type: "test:minimal"
   end
 
   defmodule QueuedEvent do
-    use Forja.Event.Schema
-
-    event_type("test:queued")
-    schema_version(1)
-    queue(:payments)
+    use Forja.Event.Schema, event_type: "test:queued", queue: :payments
 
     payload do
       field(:id, Zoi.string())
@@ -50,9 +38,7 @@ defmodule Forja.Event.SchemaTest do
   end
 
   defmodule DefaultQueueEvent do
-    use Forja.Event.Schema
-
-    event_type("test:default_queue")
+    use Forja.Event.Schema, event_type: "test:default_queue"
 
     payload do
       field(:id, Zoi.string())
@@ -148,6 +134,12 @@ defmodule Forja.Event.SchemaTest do
       upcasted = VersionedEvent.upcast(1, old_payload)
       assert upcasted.user_id == "cust_123"
       assert upcasted.currency == "USD"
+    end
+  end
+
+  describe "idempotency_key/1" do
+    test "default returns nil" do
+      assert ValidEvent.idempotency_key(%{"user_id" => "u1"}) == nil
     end
   end
 end

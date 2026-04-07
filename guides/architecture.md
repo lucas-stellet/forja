@@ -89,14 +89,13 @@ Scans for events where `processed_at IS NULL` and `inserted_at` exceeds the thre
 
 ## Per-event queue routing
 
-Event schema modules can declare a custom Oban queue using the `queue` macro. Forja prefixes the name with `forja_` internally:
+Event schema modules can declare a custom Oban queue using the `:queue` option. Forja prefixes the name with `forja_` internally:
 
 ```elixir
 defmodule MyApp.Events.PaymentReceived do
-  use Forja.Event.Schema
-
-  event_type "payment:received"
-  queue :payments  # routes to :forja_payments
+  use Forja.Event.Schema,
+    event_type: "payment:received",
+    queue: :payments  # routes to :forja_payments
 
   payload do
     field :amount_cents, Zoi.integer() |> Zoi.positive()

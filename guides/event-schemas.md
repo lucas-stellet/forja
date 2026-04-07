@@ -23,10 +23,8 @@ Define a schema module for each event type using `Forja.Event.Schema`:
 
 ```elixir
 defmodule MyApp.Events.OrderCreated do
-  use Forja.Event.Schema
-
-  event_type "order:created"
-  schema_version 1
+  use Forja.Event.Schema,
+    event_type: "order:created"
 
   payload do
     field :order_id, Zoi.string()
@@ -38,19 +36,17 @@ defmodule MyApp.Events.OrderCreated do
 end
 ```
 
-**`event_type/1`** sets the string identifier for this event. This is the value consumers subscribe to.
+**`:event_type`** (required) sets the string identifier for this event. This is the value consumers subscribe to.
 
-**`schema_version/1`** sets the schema version (defaults to 1 if omitted). Increment this when the payload shape changes in a breaking way.
+**`:schema_version`** sets the schema version (defaults to 1 if omitted). Increment this when the payload shape changes in a breaking way.
 
-**`queue/1`** sets the Oban queue for this event type. Forja prefixes the name with `forja_` internally. Optional — when omitted, the event uses the `default_queue` from the Forja config (default: `:events`, resolves to `:forja_events`).
+**`:queue`** sets the Oban queue for this event type. Forja prefixes the name with `forja_` internally. Optional — when omitted, the event uses the `default_queue` from the Forja config (default: `:events`, resolves to `:forja_events`).
 
 ```elixir
 defmodule MyApp.Events.PaymentConfirmed do
-  use Forja.Event.Schema
-
-  event_type "payment:confirmed"
-  schema_version 1
-  queue :payments  # Oban job goes to :forja_payments
+  use Forja.Event.Schema,
+    event_type: "payment:confirmed",
+    queue: :payments  # Oban job goes to :forja_payments
 
   payload do
     field :order_id, Zoi.string()
@@ -79,9 +75,65 @@ payload do
 end
 ```
 
-## 3. Emitting validated events
+## 3. Centralized emission with `:forja`
 
-Use the schema module as the second argument to `Forja.emit/3`:
+When you pass `:forja` to `use`, the module generates `emit/1,2` and `emit_multi/2,3` convenience functions. Combined with `:source` and the `idempotency_key/1` callback, the schema becomes the single source of truth for how events are emitted:
+
+```elixir
+defmodule MyApp.Events.OrderCreated do
+  use Forja.Event.Schema,
+    event_type: "order:created",
+    queue: :orders,
+    forja: :my_app,           # enables emit/1,2 and emit_multi/2,3
+    source: "orders"          # default source for all emissions
+
+  payload do
+    field :order_id, Zoi.string()
+    field :user_id, Zoi.string()
+    field :amount_cents, Zoi.integer() |> Zoi.positive()
+  end
+
+  # Derive idempotency key from payload (receives string-keyed map)
+  def idempotency_key(payload) do
+    "order_created:#{payload["order_id"]}"
+  end
+end
+```
+
+Now emit directly from the schema module:
+
+```elixir
+# All defaults (source, idempotency_key) come from the schema
+MyApp.Events.OrderCreated.emit(%{order_id: "ord-123", user_id: "usr-456", amount_cents: 4999})
+
+# Override source when needed
+MyApp.Events.OrderCreated.emit(%{order_id: "ord-123", user_id: "usr-456", amount_cents: 4999},
+  source: "manual_import"
+)
+```
+
+**`emit_multi/2,3`** works the same way:
+
+```elixir
+Ecto.Multi.new()
+|> Ecto.Multi.insert(:order, order_changeset)
+|> MyApp.Events.OrderCreated.emit_multi(
+  payload_fn: fn %{order: order} -> %{
+    order_id: order.id,
+    user_id: order.user_id,
+    amount_cents: order.total_cents
+  } end
+)
+|> Forja.transaction(:my_app)
+```
+
+The `idempotency_key/1` callback receives the string-keyed payload and returns a key string (or `nil` for no idempotency). The default implementation returns `nil`. When using `payload_fn`, the idempotency key cannot be derived automatically — pass it explicitly if needed.
+
+All options (`:source`, `:idempotency_key`, `:correlation_id`, `:causation_id`) can be overridden per-call.
+
+## 4. Emitting via `Forja.emit/3` directly
+
+If you prefer not to use `:forja`, or your schema is used across multiple Forja instances, you can still pass the schema module directly to `Forja.emit/3`:
 
 ```elixir
 Forja.emit(:my_app, MyApp.Events.OrderCreated,
@@ -93,17 +145,11 @@ Forja.emit(:my_app, MyApp.Events.OrderCreated,
 )
 ```
 
-`emit/3` calls `MyApp.Events.OrderCreated.parse_payload/1` internally. If validation fails, emission is rejected and returns an error:
-
-```elixir
-{:error, {:validation, errors}}
-```
-
-Where `errors` is the Zoi validation error list describing which fields were missing or invalid.
+`emit/3` calls `MyApp.Events.OrderCreated.parse_payload/1` internally. If validation fails, emission is rejected and returns `{:error, %Forja.ValidationError{}}`.
 
 Defaults are applied during parsing — the `currency` field in the example above defaults to `"USD"` even though it was not provided in the payload.
 
-**`emit_multi/4`** also works with schema modules:
+**`Forja.emit_multi/4`** also works with schema modules:
 
 ```elixir
 Ecto.Multi.new()
@@ -120,7 +166,7 @@ Ecto.Multi.new()
 
 The payload is validated before the event is inserted into the database. If validation fails, the multi fails and the transaction rolls back.
 
-## 4. Why versioning matters
+## 5. Why versioning matters
 
 Persistent event stores keep old events in the database indefinitely. When you replay those events against new handlers, the handlers expect the current payload shape — but the stored payload reflects the shape at the time of emission.
 
@@ -133,7 +179,7 @@ Consider this timeline:
 
 Event-Carried State Transfer requires careful versioning precisely because the payload is the only thing the consumer has access to. Without a versioning strategy, schema evolution breaks replay and reconciliation.
 
-## 5. How versioning works
+## 6. How versioning works
 
 Every schema module carries a `schema_version` integer. When an event is persisted, this integer is stored in the `forja_events.schema_version` column. The original payload is **never modified** in the database.
 
@@ -141,10 +187,9 @@ Every schema module carries a `schema_version` integer. When an event is persist
 
 ```elixir
 defmodule MyApp.Events.OrderCreated do
-  use Forja.Event.Schema
-
-  event_type "order:created"
-  schema_version 2
+  use Forja.Event.Schema,
+    event_type: "order:created",
+    schema_version: 2
 
   payload do
     field :order_id, Zoi.string(), required: true
@@ -180,7 +225,7 @@ When an event with `schema_version: 1` is read from the database, Forja calls `u
 
 **Upcasting chain:** If you go from v1 → v2 → v3, implement `upcast/2` for each transition. Forja calls `upcast` with the stored version number, not necessarily `version - 1`, so each function must handle the full transformation from that version.
 
-## 6. Relationship with handlers
+## 7. Relationship with handlers
 
 Handlers receive `Forja.Event` structs regardless of how the event was emitted. A schema-validated event produces the same `Forja.Event` shape as an untyped event — the only difference is that the `payload` field is guaranteed to have passed Zoi validation when it was emitted.
 
@@ -202,7 +247,7 @@ end
 
 Every event emitted through Forja is validated against its schema module, so handlers can trust the payload structure.
 
-## 7. Dependency note
+## 8. Dependency note
 
 `Forja.Event.Schema` depends on [Zoi](https://hex.pm/zoi). Zoi is listed as an **optional** dependency in Forja's `mix.exs`:
 
@@ -212,7 +257,7 @@ Every event emitted through Forja is validated against its schema module, so han
 
 Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.2"}` to your deps.
 
-## 8. Correlation & Causation IDs
+## 9. Correlation & Causation IDs
 
 Every event emitted through Forja carries two identifying fields:
 
