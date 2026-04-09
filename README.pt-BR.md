@@ -51,7 +51,7 @@ Adicione `forja` nas dependencias do `mix.exs`:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.4.0"}
+    {:forja, "~> 0.4"}
   ]
 end
 ```

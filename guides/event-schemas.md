@@ -255,7 +255,7 @@ Every event emitted through Forja is validated against its schema module, so han
 {:zoi, "~> 0.17"}
 ```
 
-Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.4.0"}` to your deps.
+Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.4"}` to your deps.
 
 ## 9. Correlation & Causation IDs
 
