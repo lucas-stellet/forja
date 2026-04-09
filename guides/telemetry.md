@@ -9,7 +9,7 @@ Forja emits telemetry events via `:telemetry.execute/3` for observability. All e
 Emitted when an event is persisted and broadcast.
 
 - **Measurements:** `%{count: 1}`
-- **Metadata:** `%{name: atom, type: string, source: string}`
+- **Metadata:** `%{name: atom, type: string, source: string, correlation_id: string | nil}`. The `payload` field is conditionally included when `include_payload: true` is configured.
 
 ### `[:forja, :event, :processed]`
 
@@ -24,6 +24,13 @@ Emitted when a handler returns `{:error, reason}` or raises an exception.
 
 - **Measurements:** `%{count: 1}`
 - **Metadata:** `%{name: atom, type: string, handler: module, path: atom, reason: term}`
+
+### `[:forja, :event, :validation_failed]`
+
+Emitted when a schema validation fails during event emission.
+
+- **Measurements:** `%{count: 1}`
+- **Metadata:** `%{name: atom, type: string | module, errors: term}`
 
 ### `[:forja, :event, :dead_letter]`
 
@@ -85,8 +92,8 @@ The `:level` option determines which event categories are logged:
 | Level | Events logged |
 |-------|---------------|
 | `:debug` | All events (emitted, processed, deduplicated, reconciled, failed, validation_failed, dead_letter, abandoned) |
-| `:info` | Lifecycle + problems (emitted, processed, reconciled, failed, dead_letter, abandoned) |
-| `:warning` | Problems only (failed, dead_letter, abandoned) |
+| `:info` | Lifecycle + problems (emitted, processed, reconciled, failed, validation_failed, dead_letter, abandoned) |
+| `:warning` | Problems only (failed, validation_failed, dead_letter, abandoned) |
 | `:error` | Critical only (dead_letter, abandoned) |
 
 Each event is logged at a Logger level matching its severity: `:info` for lifecycle events, `:debug` for internal details, `:warning` for failures, `:error` for critical issues.

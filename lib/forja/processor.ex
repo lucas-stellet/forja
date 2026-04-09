@@ -10,7 +10,7 @@ defmodule Forja.Processor do
   5. Broadcasts via PubSub
 
   Called by the Oban worker and the reconciliation worker.
-  This module has no state -- it is a pure functional module.
+  This module has no GenServer state -- it operates as a stateless service module.
   """
 
   require Logger

@@ -26,11 +26,11 @@ test "creates order and emits event" do
   {:ok, order} = MyApp.Orders.create_order(%{total: 5000})
 
   # Assert the event exists
-  event = assert_event_emitted(:my_app, "order:created")
+  event = assert_event_emitted(:my_app, MyApp.Events.OrderCreated)
   assert event.source == "orders"
 
   # Assert with payload matching
-  assert_event_emitted(:my_app, "order:created", %{"total" => 5000})
+  assert_event_emitted(:my_app, MyApp.Events.OrderCreated, %{"total" => 5000})
 end
 ```
 
@@ -44,7 +44,7 @@ Verifies that no event of the given type exists:
 test "invalid order does not emit event" do
   {:error, _} = MyApp.Orders.create_order(%{total: -1})
 
-  refute_event_emitted(:my_app, "order:created")
+  refute_event_emitted(:my_app, MyApp.Events.OrderCreated)
 end
 ```
 
@@ -56,7 +56,7 @@ Processes all unprocessed events synchronously using the `:inline` path. This is
 
 ```elixir
 test "handler sends notification" do
-  Forja.emit(:my_app, "order:created", payload: %{"order_id" => "123"})
+  Forja.emit(:my_app, MyApp.Events.OrderCreated, payload: %{"order_id" => "123"})
 
   # Process all pending events (handlers execute here)
   process_all_pending(:my_app)
@@ -74,13 +74,13 @@ Verifies that exactly one event exists with the given idempotency key:
 
 ```elixir
 test "duplicate emission is prevented" do
-  Forja.emit(:my_app, "order:created",
+  Forja.emit(:my_app, MyApp.Events.OrderCreated,
     payload: %{"order_id" => "123"},
     idempotency_key: "order-123"
   )
 
   # Second emission with same key
-  Forja.emit(:my_app, "order:created",
+  Forja.emit(:my_app, MyApp.Events.OrderCreated,
     payload: %{"order_id" => "123"},
     idempotency_key: "order-123"
   )

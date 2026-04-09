@@ -17,7 +17,7 @@ defmodule Forja.Telemetry do
   | Level      | Events logged                                                     |
   |------------|-------------------------------------------------------------------|
   | `:debug`   | All events (emitted, processed, deduplicated, reconciled, failed, validation_failed, dead_letter, abandoned) |
-  | `:info`    | Lifecycle + problems (emitted, processed, reconciled, failed, validation_failed, dead_letter, abandoned) |
+  | `:info`    | Lifecycle + problems (emitted, processed, reconciled, failed, validation_failed, dead_letter, abandoned)              |
   | `:warning` | Problems only (failed, validation_failed, dead_letter, abandoned) |
   | `:error`   | Critical only (dead_letter, abandoned)                            |
 
@@ -285,7 +285,13 @@ defmodule Forja.Telemetry do
   """
   @spec emit_emitted(atom(), map()) :: :ok
   def emit_emitted(name, %{type: type} = attrs) do
-    meta = %{name: name, type: type, source: attrs[:source], correlation_id: attrs[:correlation_id]}
+    meta = %{
+      name: name,
+      type: type,
+      source: attrs[:source],
+      correlation_id: attrs[:correlation_id]
+    }
+
     meta = if attrs[:payload], do: Map.put(meta, :payload, attrs.payload), else: meta
 
     :telemetry.execute([:forja, :event, :emitted], %{count: 1}, meta)

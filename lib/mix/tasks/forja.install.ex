@@ -307,7 +307,7 @@ if Code.ensure_loaded?(Igniter) do
             plugins: [
               {Oban.Plugins.Cron,
                crontab: [
-                 {"0 * * * *", Forja.Workers.ReconciliationWorker}
+                 {"0 * * * *", Forja.Workers.ReconciliationWorker, args: %{forja_name: "my_app"}}
                ]}
             ]
 

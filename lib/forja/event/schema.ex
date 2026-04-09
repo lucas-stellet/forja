@@ -32,7 +32,7 @@ defmodule Forja.Event.Schema do
       end
 
   When `:forja` is provided, the module also generates `emit/1,2` and
-  `emit_multi/2,3` convenience functions:
+  `emit_multi/1,2` convenience functions:
 
       # Instead of Forja.emit(:my_app, MyApp.Events.OrderCreated, payload: ..., source: ...)
       MyApp.Events.OrderCreated.emit(%{user_id: "u123", amount_cents: 500})
@@ -55,7 +55,7 @@ defmodule Forja.Event.Schema do
     * `:event_type` - String identifier for this event type (required)
     * `:schema_version` - Positive integer for payload versioning (default: `1`)
     * `:queue` - Atom for Oban queue routing, prefixed with `forja_` internally (default: `nil`)
-    * `:forja` - Atom for the Forja instance name; enables `emit/1,2` and `emit_multi/2,3` (default: `nil`)
+    * `:forja` - Atom for the Forja instance name; enables `emit/1,2` and `emit_multi/1,2` (default: `nil`)
     * `:source` - Default source string for events emitted via `emit/1,2` (default: `nil`)
 
   ## Generated functions
@@ -71,7 +71,7 @@ defmodule Forja.Event.Schema do
   When `:forja` is provided, also generates:
 
   - `emit/1,2` - Emits the event via `Forja.emit/3` with schema defaults
-  - `emit_multi/2,3` - Adds event emission to an `Ecto.Multi` via `Forja.emit_multi/4`
+  - `emit_multi/1,2` - Adds event emission to an `Ecto.Multi` via `Forja.emit_multi/4`
 
   ## Compile-time validations
 

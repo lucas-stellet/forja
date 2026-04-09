@@ -5,10 +5,9 @@ defmodule Forja.Testing do
   Provides functions to verify that events were emitted and to
   process pending events synchronously in tests.
 
-  ## Inline mode
+  ## Setup
 
-  In tests, Forja can be configured to process events synchronously
-  without Oban:
+  Start Forja in your test setup. Use `process_all_pending/1` to synchronously process pending events after emission:
 
       start_supervised!(
         {Forja,

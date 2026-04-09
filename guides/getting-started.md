@@ -15,7 +15,7 @@ Add `forja` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.3.0"}
+    {:forja, "~> 0.4.0"}
   ]
 end
 ```
@@ -28,6 +28,14 @@ mix deps.get
 
 ## Step 2: Generate the migration
 
+**Note:** `mix forja.install` requires [Igniter](https://hexdocs.pm/igniter). Add it to your dependencies if you don't already have it:
+
+```elixir
+{:igniter, "~> 0.7"}
+```
+
+Then run:
+
 ```bash
 mix forja.install
 mix ecto.migrate
@@ -35,7 +43,7 @@ mix ecto.migrate
 
 This creates the `forja_events` table with all necessary indexes.
 
-> If you have [Igniter](https://hexdocs.pm/igniter) installed, `mix igniter.install forja` handles steps 2-4 automatically.
+> If you have Igniter installed, `mix igniter.install forja` handles steps 2-4 automatically.
 
 ## Step 3: Configure Oban queues
 

@@ -26,7 +26,7 @@ Every event is atomically persisted and enqueued:
 - **Guaranteed processing** -- Oban persists the event and processes it as a background job with retries
 - **Instant notification** -- PubSub broadcasts after commit for real-time subscribers (best-effort)
 
-Three-layer deduplication (PostgreSQL advisory locks + `processed_at` column + Oban unique jobs) ensures **exactly-once processing**.
+Two-layer deduplication (`processed_at` column + Oban unique jobs) ensures **exactly-once processing**.
 
 ```
 App Code
@@ -39,7 +39,7 @@ App Code
   |
   +-- Oban polls -------> ProcessEventWorker
                                   |
-                     advisory lock + processed_at check
+                     processed_at + Oban unique check
                                   |
                           Handler.handle_event/2
 ```
@@ -51,7 +51,7 @@ Add `forja` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.3.0"}
+    {:forja, "~> 0.4.0"}
   ]
 end
 ```
@@ -74,6 +74,8 @@ This automatically generates the migration, adds Forja to your supervision tree,
 mix forja.install
 mix ecto.migrate
 ```
+
+> **Note:** `mix forja.install` requires [Igniter](https://hexdocs.pm/igniter). Add `{:igniter, "~> 0.7"}` to your deps first.
 
 2. Configure Oban queues in `config/config.exs`:
 
@@ -117,14 +119,14 @@ children = [
 
 ```elixir
 # Simple emission
-Forja.emit(:my_app, "order:created",
-  payload: %{"order_id" => order.id, "total" => order.total},
+Forja.emit(:my_app, MyApp.Events.OrderCreated,
+  payload: %{order_id: order.id, total: order.total},
   source: "orders"
 )
 
 # Idempotent emission (prevents duplicate processing)
-Forja.emit(:my_app, "payment:received",
-  payload: %{"payment_id" => payment.id},
+Forja.emit(:my_app, MyApp.Events.PaymentReceived,
+  payload: %{payment_id: payment.id},
   idempotency_key: "payment-#{payment.id}"
 )
 ```
@@ -137,7 +139,7 @@ Compose event emission with your domain operations in a single database transact
 def create_order(attrs) do
   Ecto.Multi.new()
   |> Ecto.Multi.insert(:order, Order.changeset(%Order{}, attrs))
-  |> Forja.emit_multi(:my_app, "order:created",
+  |> Forja.emit_multi(:my_app, MyApp.Events.OrderCreated,
     payload_fn: fn %{order: order} ->
       %{"order_id" => order.id, "total" => order.total}
     end,
@@ -211,7 +213,7 @@ defmodule MyApp.Events.OrderCreated do
     event_type: "order:created",
     schema_version: 2,
     queue: :payments,       # routes to :forja_payments queue
-    forja: :my_app,         # enables emit/1,2 and emit_multi/2,3
+    forja: :my_app,         # enables emit/1,2 and emit_multi/1,2
     source: "checkout"      # default source for emitted events
 
   payload do
@@ -234,7 +236,7 @@ defmodule MyApp.Events.OrderCreated do
 end
 ```
 
-When `:forja` is provided, the schema module generates `emit/1,2` and `emit_multi/2,3` — so you can emit events directly from the schema:
+When `:forja` is provided, the schema module generates `emit/1,2` and `emit_multi/1,2` — so you can emit events directly from the schema:
 
 ```elixir
 # All defaults (source, idempotency_key) come from the schema
@@ -262,13 +264,13 @@ Forja automatically tracks event chains with correlation and causation IDs:
 
 ```elixir
 # Root event gets an auto-generated correlation_id
-{:ok, root} = Forja.emit(:my_app, "order:created",
-  payload: %{"order_id" => "123"}
+{:ok, root} = Forja.emit(:my_app, MyApp.Events.OrderCreated,
+  payload: %{order_id: "123"}
 )
 
 # Child events inherit correlation_id and set causation_id to parent
-{:ok, child} = Forja.emit(:my_app, "payment:charged",
-  payload: %{"order_id" => "123"},
+{:ok, child} = Forja.emit(:my_app, MyApp.Events.PaymentCharged,
+  payload: %{order_id: "123"},
   correlation_id: root.correlation_id,
   causation_id: root.id
 )
@@ -326,7 +328,7 @@ defmodule MyApp.OrderTest do
   end
 
   test "process pending events synchronously" do
-    Forja.emit(:my_app, "order:created", payload: %{"id" => 1})
+    Forja.emit(:my_app, MyApp.Events.OrderCreated, payload: %{id: 1})
 
     process_all_pending(:my_app)
 
@@ -334,14 +336,14 @@ defmodule MyApp.OrderTest do
   end
 
   test "event causation chain" do
-    {:ok, parent} = Forja.emit(:my_app, "order:created", payload: %{"id" => 1})
-    {:ok, child} = Forja.emit(:my_app, "payment:charged",
-      payload: %{"id" => 1},
+    {:ok, parent} = Forja.emit(:my_app, MyApp.Events.OrderCreated, payload: %{id: 1})
+    {:ok, child} = Forja.emit(:my_app, MyApp.Events.PaymentCharged,
+      payload: %{id: 1},
       causation_id: parent.id,
       correlation_id: parent.correlation_id
     )
 
-    assert_event_caused_by(:my_app, child.id, parent.id)
+    assert_event_caused_by(:my_app, parent.id, MyApp.Events.PaymentCharged)
   end
 end
 ```
@@ -351,7 +353,7 @@ end
 Forja ships with a built-in default logger you can opt into:
 
 ```elixir
-Forja.Telemetry.attach_default_logger(:my_app, level: :info)
+Forja.Telemetry.attach_default_logger(level: :info)
 ```
 
 All telemetry events:
@@ -361,7 +363,6 @@ All telemetry events:
 | `[:forja, :event, :emitted]` | Event persisted and broadcast |
 | `[:forja, :event, :processed]` | Handler processed successfully (includes duration) |
 | `[:forja, :event, :failed]` | Handler returned error or raised |
-| `[:forja, :event, :skipped]` | Advisory lock already held |
 | `[:forja, :event, :dead_letter]` | Oban discarded the job |
 | `[:forja, :event, :abandoned]` | Reconciliation exhausted retries |
 | `[:forja, :event, :reconciled]` | Reconciliation processed a stale event |

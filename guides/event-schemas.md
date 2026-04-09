@@ -77,14 +77,14 @@ end
 
 ## 3. Centralized emission with `:forja`
 
-When you pass `:forja` to `use`, the module generates `emit/1,2` and `emit_multi/2,3` convenience functions. Combined with `:source` and the `idempotency_key/1` callback, the schema becomes the single source of truth for how events are emitted:
+When you pass `:forja` to `use`, the module generates `emit/1,2` and `emit_multi/1,2` convenience functions. Combined with `:source` and the `idempotency_key/1` callback, the schema becomes the single source of truth for how events are emitted:
 
 ```elixir
 defmodule MyApp.Events.OrderCreated do
   use Forja.Event.Schema,
     event_type: "order:created",
     queue: :orders,
-    forja: :my_app,           # enables emit/1,2 and emit_multi/2,3
+    forja: :my_app,           # enables emit/1,2 and emit_multi/1,2
     source: "orders"          # default source for all emissions
 
   payload do
@@ -112,7 +112,7 @@ MyApp.Events.OrderCreated.emit(%{order_id: "ord-123", user_id: "usr-456", amount
 )
 ```
 
-**`emit_multi/2,3`** works the same way:
+**`emit_multi/1,2`** works the same way:
 
 ```elixir
 Ecto.Multi.new()
@@ -196,7 +196,7 @@ defmodule MyApp.Events.OrderCreated do
     field :user_id, Zoi.string(), required: true
     field :subtotal_cents, Zoi.integer() |> Zoi.positive(), required: true
     field :tax_cents, Zoi.integer() |> Zoi.positive(), required: true
-    field :currency, Zoi.string() |> Zoi.default("USD")
+    field :currency, Zoi.string() |> Zoi.default("USD"), required: false
   end
 
   def upcast(1, payload) do
@@ -213,7 +213,7 @@ defmodule MyApp.Events.OrderCreated do
 end
 ```
 
-When an event with `schema_version: 1` is read from the database, Forja calls `upcast(1, payload)` and passes the transformed payload to handlers. The original record in the database is unchanged.
+**Note:** Automatic upcasting is not yet implemented in the processing pipeline. The `upcast/2` function is generated and overridable on your schema module, but the Processor does not call it automatically during event processing. You must call `upcast/2` manually if you need to transform old payloads before handling them. Automatic upcasting in the Processor is a planned feature for a future release. The original record in the database is unchanged.
 
 **When to increment `schema_version`:**
 - Renaming or removing a field
@@ -249,13 +249,13 @@ Every event emitted through Forja is validated against its schema module, so han
 
 ## 8. Dependency note
 
-`Forja.Event.Schema` depends on [Zoi](https://hex.pm/zoi). Zoi is listed as an **optional** dependency in Forja's `mix.exs`:
+`Forja.Event.Schema` depends on [Zoi](https://hex.pm/zoi). Zoi is listed as a **required** dependency in Forja's `mix.exs`:
 
 ```elixir
-{:zoi, "~> 0.17", optional: true}
+{:zoi, "~> 0.17"}
 ```
 
-Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.2"}` to your deps.
+Zoi is a required dependency of Forja — it is pulled in automatically when you add `{:forja, "~> 0.4.0"}` to your deps.
 
 ## 9. Correlation & Causation IDs
 

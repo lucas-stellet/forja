@@ -199,7 +199,9 @@ defmodule Forja do
     case schema_module.parse_payload(raw_payload) do
       {:ok, validated} ->
         string_keyed = stringify_keys(validated)
-        {:ok, schema_module.event_type(), string_keyed, schema_module.schema_version(), schema_module}
+
+        {:ok, schema_module.event_type(), string_keyed, schema_module.schema_version(),
+         schema_module}
 
       {:error, errors} ->
         {:error, Forja.ValidationError.new(schema_module, errors)}
@@ -242,12 +244,14 @@ defmodule Forja do
     case config.repo.transaction(multi) do
       {:ok, %{event: event}} ->
         after_emit(config, name, event)
+
         Telemetry.emit_emitted(name, %{
           type: attrs.type,
           source: attrs.source,
           payload: attrs.payload,
           correlation_id: attrs.correlation_id
         })
+
         {:ok, event}
 
       {:error, :event, changeset, _changes} ->
@@ -315,7 +319,7 @@ defmodule Forja do
         source: "orders",
         idempotency_key: "order-created-\#{order_ref}"
       )
-      |> Repo.transaction()
+      |> Forja.transaction(:billing)
   """
   @spec emit_multi(Ecto.Multi.t(), atom(), module(), keyword()) :: Ecto.Multi.t()
   def emit_multi(multi, name, type, opts \\ []) do

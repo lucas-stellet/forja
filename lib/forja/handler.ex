@@ -55,7 +55,7 @@ defmodule Forja.Handler do
   Handles a single event from the pipeline.
 
   The event is considered processed regardless of the return value. If you need to
-  handle permanent failures, use `Forja.DeadLetter` to notify an error handler.
+  handle failures, implement the optional `on_failure/3` callback.
 
   ## Arguments
 
@@ -64,7 +64,7 @@ defmodule Forja.Handler do
     - `:forja_name` - The Forja instance atom
     - `:path` - Processing path (`:oban`, `:reconciliation`, `:inline`)
     - `:correlation_id` - UUID grouping all events in the same logical transaction
-    - `:causation_id` - UUID of the event that caused this one (nil for root events)
+    - `:causation_id` - UUID of the event being processed (set as causation_id on any events emitted inside this handler)
 
     When you call `Forja.emit/3` inside a handler, `correlation_id` and `causation_id`
     are propagated automatically — you do NOT need to pass them manually.

@@ -3,7 +3,7 @@ defmodule Forja.Event do
   Ecto schema for events persisted in the `forja_events` table.
 
   Events are the core data model in Forja — they represent domain events
-  that flow through the dual-path processing pipeline (PubSub + Oban guarantees).
+  that flow through the Oban-backed processing pipeline with PubSub notifications.
 
   ## Fields
 
@@ -64,7 +64,7 @@ defmodule Forja.Event do
   Creates a changeset for the given event with the given attributes.
 
   Required fields: `:type`
-  Optional fields: `:payload`, `:meta`, `:source`, `:idempotency_key`
+  Optional fields: `:payload`, `:meta`, `:source`, `:idempotency_key`, `:schema_version`, `:correlation_id`, `:causation_id`
 
   ## Examples
 
@@ -112,7 +112,7 @@ defmodule Forja.Event do
   ## Examples
 
       iex> event = %Forja.Event{reconciliation_attempts: 0}
-      iex> mark_processed_changeset(event)
+      iex> increment_reconciliation_changeset(event)
       #Ecto.Changeset<changes: %{reconciliation_attempts: 1}>
   """
   @spec increment_reconciliation_changeset(t() | Ecto.Schema.t()) :: Ecto.Changeset.t()

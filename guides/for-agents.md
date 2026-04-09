@@ -38,7 +38,7 @@ Add `forja` to `mix.exs`:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.3.0"}
+    {:forja, "~> 0.4.0"}
   ]
 end
 ```
@@ -62,7 +62,7 @@ mix forja.install
 mix ecto.migrate
 ```
 
-This creates the `forja_events` table with the following columns: `id` (UUID), `type` (string), `payload` (map), `meta` (map), `source` (string), `processed_at` (utc_datetime_usec), `idempotency_key` (string), `reconciliation_attempts` (integer), `inserted_at` (utc_datetime_usec).
+This creates the `forja_events` table with the following columns: `id` (UUID), `type` (string), `payload` (map), `meta` (map), `source` (string), `processed_at` (utc_datetime_usec), `idempotency_key` (string), `reconciliation_attempts` (integer), `schema_version` (integer, default 1), `correlation_id` (binary_id), `causation_id` (binary_id), `inserted_at` (utc_datetime_usec).
 
 **Verification:** Confirm the migration ran successfully and the `forja_events` table exists.
 
@@ -220,7 +220,7 @@ Ecto.Multi.new()
 Use `idempotency_key` to prevent duplicate event processing:
 
 ```elixir
-Forja.emit(:my_app, "payment:received",
+Forja.emit(:my_app, MyApp.Events.PaymentReceived,
   payload: %{"payment_id" => payment.id},
   idempotency_key: "payment-#{payment.id}"
 )
@@ -306,11 +306,11 @@ defmodule MyApp.OrderTest do
   test "emitting order event" do
     {:ok, _order} = MyApp.Orders.create_order(%{total: 5000})
 
-    assert_event_emitted(:my_app, "order:created", %{"total" => 5000})
+    assert_event_emitted(:my_app, MyApp.Events.OrderCreated, %{"total" => 5000})
   end
 
   test "process and verify side effects" do
-    Forja.emit(:my_app, "order:created", payload: %{"order_id" => "123"})
+    Forja.emit(:my_app, MyApp.Events.OrderCreated, payload: %{"order_id" => "123"})
 
     process_all_pending(:my_app)
 
@@ -412,15 +412,15 @@ config :my_app, Oban,
 
 ```elixir
 # Simple
-Forja.emit(:name, "type:action", payload: %{"key" => "value"}, source: "context")
+Forja.emit(:name, MyApp.Events.TypeAction, payload: %{"key" => "value"}, source: "context")
 
 # Idempotent
-Forja.emit(:name, "type:action", payload: %{...}, idempotency_key: "unique-key")
+Forja.emit(:name, MyApp.Events.TypeAction, payload: %{...}, idempotency_key: "unique-key")
 
 # Transactional
 Multi.new()
 |> Multi.insert(:record, changeset)
-|> Forja.emit_multi(:name, "type:action", payload_fn: fn %{record: r} -> %{"id" => r.id} end)
+|> Forja.emit_multi(:name, MyApp.Events.TypeAction, payload_fn: fn %{record: r} -> %{"id" => r.id} end)
 |> Forja.transaction(:name)
 ```
 
