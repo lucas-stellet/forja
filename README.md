@@ -51,7 +51,7 @@ Add `forja` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.4"}
+    {:forja, "~> 0.5"}
   ]
 end
 ```
@@ -76,6 +76,17 @@ mix ecto.migrate
 ```
 
 > **Note:** `mix forja.install` requires [Igniter](https://hexdocs.pm/igniter). Add `{:igniter, "~> 0.7"}` to your deps first.
+
+Or create the migration manually:
+
+```elixir
+defmodule MyApp.Repo.Migrations.SetupForja do
+  use Ecto.Migration
+
+  def up, do: Forja.Migration.up()
+  def down, do: Forja.Migration.down()
+end
+```
 
 2. Configure Oban queues in `config/config.exs`:
 
@@ -383,6 +394,7 @@ For detailed telemetry metadata and custom handler examples, see the [Telemetry 
 | `:event_topic_prefix` | `"forja"` | PubSub topic prefix |
 | `:handlers` | `[]` | List of `Forja.Handler` modules |
 | `:dead_letter` | `nil` | Module implementing `Forja.DeadLetter` |
+| `:migration_check` | `true` | Verify DB migration version at startup |
 | `:reconciliation` | see below | Reconciliation settings |
 
 ### Reconciliation defaults
@@ -395,6 +407,23 @@ reconciliation: [
   max_retries: 3
 ]
 ```
+
+## Upgrading
+
+When a new Forja release requires schema changes, create a new migration targeting the new version:
+
+```elixir
+defmodule MyApp.Repo.Migrations.UpgradeForjaV2 do
+  use Ecto.Migration
+
+  def up, do: Forja.Migration.up(version: 2)
+  def down, do: Forja.Migration.down(version: 1)
+end
+```
+
+Forja checks the migration version at startup and raises an actionable error if the database is behind. Disable this with `migration_check: false` in your Forja config.
+
+See `Forja.Migration` for the full version matrix and maintainer guide.
 
 ## Guides
 

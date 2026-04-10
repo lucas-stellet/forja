@@ -130,6 +130,22 @@ An event becomes a "dead letter" when all processing attempts are exhausted. Thi
 
 In both cases, if a `Forja.DeadLetter` module is configured, its `handle_dead_letter/2` callback is invoked.
 
+## Versioned migrations
+
+Forja uses an Oban-style versioned migration system. Instead of individual migration files for each schema change, all DDL is consolidated into numbered version modules (`V01`, `V02`, etc.) under `Forja.Migrations.Postgres`.
+
+### How it works
+
+1. **Version tracking** -- The current schema version is stored as a PostgreSQL table comment on `forja_events` (zero overhead, no extra tables)
+2. **Delta execution** -- `Forja.Migration.up/1` reads the current version from the comment, then applies only the missing versions up to the target
+3. **Startup verification** -- `Forja.init/1` compares the database version against the library's `current_version/0`. If behind, it raises with a copy-pasteable migration snippet
+
+### Adding a new version (maintainer guide)
+
+1. Create `lib/forja/migrations/postgres/v02.ex` with `up/1` and `down/1`
+2. Bump `@current_version` in `Forja.Migrations.Postgres`
+3. Add tests and update the version matrix in `Forja.Migration` moduledoc
+
 ## Handler dispatch
 
 The `Processor` dispatches events to all matching handlers via the `Registry`. Handlers are matched by event type, and catch-all handlers (returning `:all` from `event_types/0`) receive every event.

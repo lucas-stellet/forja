@@ -15,7 +15,7 @@ Add `forja` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:forja, "~> 0.4"}
+    {:forja, "~> 0.5"}
   ]
 end
 ```
@@ -41,9 +41,22 @@ mix forja.install
 mix ecto.migrate
 ```
 
-This creates the `forja_events` table with all necessary indexes.
+This creates the `forja_events` table with all necessary indexes via `Forja.Migration`.
+
+You can also create the migration manually:
+
+```elixir
+defmodule MyApp.Repo.Migrations.SetupForja do
+  use Ecto.Migration
+
+  def up, do: Forja.Migration.up()
+  def down, do: Forja.Migration.down()
+end
+```
 
 > If you have Igniter installed, `mix igniter.install forja` handles steps 2-4 automatically.
+
+Forja uses versioned migrations (similar to Oban). On startup, it verifies the database schema is up to date and raises an actionable error if a migration is needed. See `Forja.Migration` for details.
 
 ## Step 3: Configure Oban queues
 
