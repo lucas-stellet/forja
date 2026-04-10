@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 defmodule MyApp.Repo.Migrations.SetupForja do
   use Ecto.Migration
 
-  def up, do: Forja.Migration.up(version: 1)
-  def down, do: Forja.Migration.down(version: 0)
+  def up, do: Forja.Migration.up()
+  def down, do: Forja.Migration.down()
 end
 ```
 

@@ -79,6 +79,8 @@ defmodule Forja.Migrations.Postgres do
     if migrated > target do
       Enum.each(migrated..max(target + 1, 1), &change(&1, :down, opts))
 
+      # When target is 0, the table has been dropped by V01.down/1,
+      # so there's no table to set a comment on.
       if target > 0 do
         set_version(target)
       end
@@ -103,7 +105,7 @@ defmodule Forja.Migrations.Postgres do
     query = """
     SELECT pg_catalog.obj_description(c.oid, 'pg_class')
     FROM pg_catalog.pg_class c
-    WHERE c.relname = '#{@table}'
+    WHERE c.relname = $1
     """
 
     migration_repo =
@@ -112,7 +114,7 @@ defmodule Forja.Migrations.Postgres do
         :error -> repo()
       end
 
-    %{rows: rows} = migration_repo.query!(query, [])
+    %{rows: rows} = migration_repo.query!(query, [@table])
     parse_version(rows)
   end
 

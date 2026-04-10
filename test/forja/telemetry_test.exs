@@ -39,7 +39,11 @@ defmodule Forja.TelemetryTest do
   end
 
   test "emit_emitted/2 includes payload when provided" do
-    Telemetry.emit_emitted(:test, %{type: "order:created", source: "orders", payload: %{"id" => 1}})
+    Telemetry.emit_emitted(:test, %{
+      type: "order:created",
+      source: "orders",
+      payload: %{"id" => 1}
+    })
 
     assert_receive {:telemetry, [:forja, :event, :emitted], %{count: 1},
                     %{name: :test, type: "order:created", payload: %{"id" => 1}}}

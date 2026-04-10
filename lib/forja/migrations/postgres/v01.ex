@@ -88,6 +88,8 @@ defmodule Forja.Migrations.Postgres.V01 do
         name: :forja_events_causation_id
       )
     )
+
+    :ok
   end
 
   @doc """
