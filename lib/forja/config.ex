@@ -15,6 +15,7 @@ defmodule Forja.Config do
     * `:event_topic_prefix` - Prefix for PubSub topics (default: `"forja"`)
     * `:handlers` - List of modules implementing `Forja.Handler` (default: `[]`)
     * `:dead_letter` - Module implementing `Forja.DeadLetter` (default: `nil`, optional)
+    * `:migration_check` - Whether to verify DB migration version at startup (default: `true`)
     * `:reconciliation` - Keyword list for reconciliation settings (default: see below)
 
   ## Reconciliation defaults
@@ -37,6 +38,7 @@ defmodule Forja.Config do
     event_topic_prefix: "forja",
     handlers: [],
     dead_letter: nil,
+    migration_check: true,
     reconciliation: [
       enabled: true,
       interval_minutes: 60,
@@ -54,6 +56,7 @@ defmodule Forja.Config do
           event_topic_prefix: String.t(),
           handlers: [module()],
           dead_letter: module() | nil,
+          migration_check: boolean(),
           reconciliation: keyword()
         }
 

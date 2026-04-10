@@ -79,6 +79,7 @@ defmodule Forja.EventSchemaEmitTest do
        repo: Repo,
        pubsub: Forja.SchemaEmitTestPubSub,
        oban_name: Forja.SchemaEmitTestOban,
+       migration_check: false,
        handlers: []}
     )
 

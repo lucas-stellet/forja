@@ -452,6 +452,7 @@ defmodule Forja do
 
     {table, catch_all} = Registry.build(config.handlers)
     Registry.store(config.name, table, catch_all)
+    verify_migrated!(config)
 
     children = [
       {ObanListener, name: config.name}
@@ -462,6 +463,28 @@ defmodule Forja do
 
   defp after_emit(config, _name, event) do
     safe_broadcast(config, event, :forja_event_emitted)
+  end
+
+  defp verify_migrated!(%Config{migration_check: false}), do: :ok
+
+  defp verify_migrated!(%Config{repo: repo}) do
+    current = Forja.Migration.current_version()
+    migrated = Forja.Migrations.Postgres.migrated_version(repo: repo)
+
+    if migrated < current do
+      raise """
+      Forja requires migration version #{current}, but the database is at version #{migrated}.
+
+      Create a new Ecto migration and run `mix ecto.migrate`:
+
+          defmodule MyApp.Repo.Migrations.UpgradeForjaV#{current} do
+            use Ecto.Migration
+
+            def up, do: Forja.Migration.up(version: #{current})
+            def down, do: Forja.Migration.down(version: #{migrated})
+          end
+      """
+    end
   end
 
   defp safe_broadcast(config, event, tag) do
