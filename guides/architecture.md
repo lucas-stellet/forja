@@ -138,7 +138,7 @@ Forja uses an Oban-style versioned migration system. Instead of individual migra
 
 1. **Version tracking** -- The current schema version is stored as a PostgreSQL table comment on `forja_events` (zero overhead, no extra tables)
 2. **Delta execution** -- `Forja.Migration.up/1` reads the current version from the comment, then applies only the missing versions up to the target
-3. **Startup verification** -- `Forja.init/1` compares the database version against the library's `current_version/0`. If behind, it raises with a copy-pasteable migration snippet
+3. **Startup verification** -- Forja compares the database version against `current_version/0` at startup. If behind, it raises with a copy-pasteable migration snippet
 
 ### Adding a new version (maintainer guide)
 
