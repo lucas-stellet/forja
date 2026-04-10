@@ -73,6 +73,8 @@ defmodule Forja.MixProject do
   defp extras do
     [
       "README.md",
+      "README.pt-BR.md",
+      "LICENSE",
       "guides/getting-started.md",
       "guides/architecture.md",
       "guides/telemetry.md",

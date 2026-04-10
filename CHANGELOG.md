@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-10
+
+### Added
+
+- Versioned Forja migrations through `Forja.Migration` and `Forja.Migrations.Postgres.V01`
+
+### Migration
+
+```elixir
+defmodule MyApp.Repo.Migrations.SetupForja do
+  use Ecto.Migration
+
+  def up, do: Forja.Migration.up(version: 1)
+  def down, do: Forja.Migration.down(version: 0)
+end
+```
+
 ## [0.4.1] - 2026-04-08
 
 ### Fixed

@@ -6,6 +6,8 @@ defmodule Forja.MigrationTest do
   alias Forja.Migration
   alias Forja.TestRepo, as: Repo
 
+  doctest Forja.Migration
+
   defmodule UpMigration do
     use Ecto.Migration
 
