@@ -21,7 +21,10 @@ defmodule Forja.CorrelationTest do
     Process.register(self(), :correlation_test)
 
     start_supervised!({Phoenix.PubSub, name: Forja.CorrelationTestPubSub})
-    start_supervised!({Oban, name: Forja.CorrelationTestOban, repo: Repo, queues: false, testing: :inline})
+
+    start_supervised!(
+      {Oban, name: Forja.CorrelationTestOban, repo: Repo, queues: false, testing: :inline}
+    )
 
     start_supervised!(
       {Forja,
@@ -29,6 +32,7 @@ defmodule Forja.CorrelationTest do
        repo: Repo,
        pubsub: Forja.CorrelationTestPubSub,
        oban_name: Forja.CorrelationTestOban,
+       migration_check: false,
        handlers: [CorrelationTestHandler]}
     )
 

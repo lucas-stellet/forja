@@ -45,6 +45,7 @@ defmodule Forja.CorrelationPropagationTest do
        repo: Repo,
        pubsub: Forja.PropagationPubSub,
        oban_name: Forja.PropagationOban,
+       migration_check: false,
        handlers: [PropagatingHandler]}
     )
 

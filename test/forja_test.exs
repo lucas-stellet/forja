@@ -4,6 +4,7 @@ defmodule ForjaTest do
   alias Forja.Event
   alias Forja.TestEvents.EmitTestCreated
   alias Forja.TestEvents.EmitTestMulti
+
   defmodule EmitTestHandler do
     @behaviour Forja.Handler
 
@@ -30,6 +31,7 @@ defmodule ForjaTest do
        repo: Repo,
        pubsub: Forja.EmitTestPubSub,
        oban_name: Forja.TestOban,
+       migration_check: false,
        handlers: [EmitTestHandler]}
     )
 

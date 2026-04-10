@@ -37,10 +37,21 @@ defmodule Forja.ConfigTest do
       assert config.event_topic_prefix == "forja"
       assert config.handlers == []
       assert config.dead_letter == nil
+      assert config.migration_check == true
       assert config.reconciliation[:enabled] == true
       assert config.reconciliation[:interval_minutes] == 60
       assert config.reconciliation[:threshold_minutes] == 15
       assert config.reconciliation[:max_retries] == 3
+    end
+
+    test "migration_check defaults to true when not provided" do
+      config = Config.new(name: :test_app, repo: Repo, pubsub: PubSub)
+      assert config.migration_check == true
+    end
+
+    test "accepts migration_check override" do
+      config = Config.new(name: :test_app, repo: Repo, pubsub: PubSub, migration_check: false)
+      assert config.migration_check == false
     end
 
     test "allows overriding defaults" do

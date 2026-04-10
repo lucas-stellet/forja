@@ -1,7 +1,7 @@
 defmodule Forja.MixProject do
   use Mix.Project
 
-  @version "0.4.1"
+  @version "0.5.0"
   @source_url "https://github.com/lucas-stellet/forja"
 
   def project do
@@ -73,6 +73,8 @@ defmodule Forja.MixProject do
   defp extras do
     [
       "README.md",
+      "README.pt-BR.md",
+      "LICENSE",
       "guides/getting-started.md",
       "guides/architecture.md",
       "guides/telemetry.md",
